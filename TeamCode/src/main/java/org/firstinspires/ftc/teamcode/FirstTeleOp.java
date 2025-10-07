@@ -28,10 +28,13 @@ public class FirstTeleOp extends OpMode {
     public void init() {
         //init runs once before match starts
         //hardwareMap connects to the actual motor on the control/expansion hub
-        frontleft = hardwareMap.get(DcMotor.class, "leftFront");
-        frontright = hardwareMap.get(DcMotor.class, "rightFront");
-        backright = hardwareMap.get(DcMotor.class, "rightRear");
-        backleft = hardwareMap.get(DcMotor.class, "leftRear");
+        frontleft = hardwareMap.get(DcMotor.class, "front_left_motor");
+        frontright = hardwareMap.get(DcMotor.class, "front_right_motor");
+        backleft = hardwareMap.get(DcMotor.class, "back_left_motor");
+        backright = hardwareMap.get(DcMotor.class, "back_right_motor");
+
+
+
     }
 
 
