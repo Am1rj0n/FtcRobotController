@@ -13,23 +13,27 @@ public class FirstTeleOp extends OpMode {
     private DcMotor frontleft, frontright, backleft, backright;
     private IMU imu;
 
+    // Speed modifier starting at 50%
+    private double speedModifier = 0.5;
+
+    // Track previous bumper states for edge detection
+    private boolean prevRightBumper = false;
+    private boolean prevLeftBumper = false;
+
     @Override
     public void init() {
-        // Initialize motors
         frontleft = hardwareMap.get(DcMotor.class, "front_left_motor");
         frontright = hardwareMap.get(DcMotor.class, "front_right_motor");
         backleft = hardwareMap.get(DcMotor.class, "back_left_motor");
         backright = hardwareMap.get(DcMotor.class, "back_right_motor");
 
-        // Set motor directions
         frontleft.setDirection(DcMotor.Direction.REVERSE);
         backleft.setDirection(DcMotor.Direction.REVERSE);
 
-        // ✅ IMU Setup — built-in BHI260AP (adjust orientation if needed)
         imu = hardwareMap.get(IMU.class, "imu");
         IMU.Parameters imuParams = new IMU.Parameters(
                 new RevHubOrientationOnRobot(
-                        RevHubOrientationOnRobot.LogoFacingDirection.UP, //robot control hub logo is facing up and the usb is facing the right
+                        RevHubOrientationOnRobot.LogoFacingDirection.UP,
                         RevHubOrientationOnRobot.UsbFacingDirection.RIGHT
                 )
         );
@@ -41,25 +45,38 @@ public class FirstTeleOp extends OpMode {
 
     @Override
     public void loop() {
-        // Read IMU yaw angle (heading) in degrees
+        // Edge detection for right bumper (increase speed)
+        if (gamepad1.right_bumper && !prevRightBumper) {
+            speedModifier += 0.1; // Increase speed by 10%
+            if (speedModifier > 1.0) speedModifier = 1.0; // Cap at 100%
+        }
+        prevRightBumper = gamepad1.right_bumper;
+
+        // Edge detection for left bumper (decrease speed)
+        if (gamepad1.left_bumper && !prevLeftBumper) {
+            speedModifier -= 0.1; // Decrease speed by 10%
+            if (speedModifier < 0.0) speedModifier = 0.0; // Floor at 0%
+        }
+        prevLeftBumper = gamepad1.left_bumper;
+
+        // Read IMU angles
         double yaw = imu.getRobotYawPitchRollAngles().getYaw(AngleUnit.DEGREES);
         double pitch = imu.getRobotYawPitchRollAngles().getPitch(AngleUnit.DEGREES);
         double roll = imu.getRobotYawPitchRollAngles().getRoll(AngleUnit.DEGREES);
 
-        // Convert yaw to radians for math
         double robotAngle = Math.toRadians(yaw);
 
         // Joystick inputs
-        double axial = -gamepad1.left_stick_y;  // forward/back
-        double lateral = gamepad1.left_stick_x; // strafe
-        double yawInput = gamepad1.right_stick_x; // rotation
+        double axial = -gamepad1.left_stick_y;
+        double lateral = gamepad1.left_stick_x;
+        double yawInput = gamepad1.right_stick_x;
 
         // Field-centric transform
         double temp = axial * Math.cos(robotAngle) - lateral * Math.sin(robotAngle);
         lateral = axial * Math.sin(robotAngle) + lateral * Math.cos(robotAngle);
         axial = temp;
 
-        // Mecanum drive power calculations
+        // Calculate motor powers
         double leftFrontPower  = axial + lateral + yawInput;
         double rightFrontPower = axial - lateral - yawInput;
         double leftBackPower   = axial - lateral + yawInput;
@@ -77,29 +94,27 @@ public class FirstTeleOp extends OpMode {
             rightBackPower /= max;
         }
 
-        // Set motor power
-        frontleft.setPower(leftFrontPower);
-        frontright.setPower(rightFrontPower);
-        backleft.setPower(leftBackPower);
-        backright.setPower(rightBackPower);
+        // Apply speed modifier
+        frontleft.setPower(leftFrontPower * speedModifier);
+        frontright.setPower(rightFrontPower * speedModifier);
+        backleft.setPower(leftBackPower * speedModifier);
+        backright.setPower(rightBackPower * speedModifier);
 
-        // Optional: Reset heading with 'A' button
+        // Reset IMU heading with 'A'
         if (gamepad1.a) {
             imu.resetYaw();
         }
 
-        // Telemetry for debugging
+        // Telemetry output - including current speed modifier
         telemetry.addData("Yaw (deg)", yaw);
         telemetry.addData("Pitch (deg)", pitch);
         telemetry.addData("Roll (deg)", roll);
-        telemetry.addData("Axial", axial);
-        telemetry.addData("Lateral", lateral);
-        telemetry.addData("Yaw Input", yawInput);
+        telemetry.addData("Axial (forward/back)", axial);
+        telemetry.addData("Lateral (strafe)", lateral);
+        telemetry.addData("Yaw Input (rotation)", yawInput);
+        telemetry.addData("Speed Modifier", String.format("%.0f%%", speedModifier * 100));
+        telemetry.addLine("Use LB/RB to decrease/increase speed by 10%");
         telemetry.addLine("Press A to reset heading");
         telemetry.update();
     }
 }
-
-
-//Logo facing UP
-//USB port facing RIGHT
