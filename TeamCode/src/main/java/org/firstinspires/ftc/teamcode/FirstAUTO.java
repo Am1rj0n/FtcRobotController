@@ -56,12 +56,26 @@ public class FirstAUTO extends LinearOpMode {
 
     private void runAutonomousMode() {
         // Move relative to FIELD direction, not robot direction
-        drivePOV(0.5, 0, 0, 2.0);   // Forward
+        drivePOV(0.5, 0, 0, 3.8);   // Forward
+        sleep(1000);
+
         drivePOV(-0.5, 0, 0, 2.0);  // Backward
+        sleep(1000);
+
         drivePOV(0, 0.5, 0, 2.0);   // Strafe Right
-        drivePOV(0, -0.5, 0, 2.0);  // Strafe Left
-        drivePOV(0, 0, 0.5, 1.5);   // Rotate Clockwise
-        drivePOV(0, 0, -0.5, 1.5);  // Rotate Counter-Clockwise
+        sleep(1000);
+
+        drivePOV(0, -0.5, 0, 4.0);  // Strafe Left
+        sleep(1000);
+
+        drivePOV(0, 0.5, 0, 2.0);  // Strafe Right
+        sleep(1000);
+
+        drivePOV(0, 0, 0.5, 1.8);   // Rotate Clockwise
+        sleep(1000);
+
+        drivePOV(0, 0, -0.5, 1.8);  // Rotate Counter-Clockwise
+        sleep(1000);
         stopAll();
     }
 
