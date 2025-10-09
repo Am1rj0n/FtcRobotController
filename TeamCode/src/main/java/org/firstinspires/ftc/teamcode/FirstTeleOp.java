@@ -7,7 +7,7 @@ import com.qualcomm.robotcore.hardware.IMU;
 import com.qualcomm.hardware.rev.RevHubOrientationOnRobot;
 import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
 
-@TeleOp(name = "MecanumTeleOp_POV", group = "TeleOp")
+@TeleOp(name = "MecanumTeleOP_POV", group = "TeleOp")
 public class FirstTeleOp extends OpMode {
 
     private DcMotor frontleft, frontright, backleft, backright;
