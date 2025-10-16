@@ -19,9 +19,8 @@ public class Constants {
             .useSecondaryDrivePIDF(true)
 
 
-            .forwardZeroPowerAcceleration(30)  // placeholder value
+            .forwardZeroPowerAcceleration(30)  // placeholder value ]
             .lateralZeroPowerAcceleration(30); // placeholder value
-
 
 
 
