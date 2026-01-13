@@ -18,8 +18,8 @@ public class IntakeSubsystem {
     private boolean objectDetected = false;
     private boolean jammed = false;
 
-    private static final double JAM_DISTANCE_CM = 18.0;
-    private static final double JAM_TIME = 0.2;
+    private static final double JAM_DISTANCE_CM = 17.0;
+    private static final double JAM_TIME = 0.3;
 
     // Power values from EnhancedTele
     private static final double INTAKE_POWER = -1.0;
@@ -46,6 +46,7 @@ public class IntakeSubsystem {
     }
 
     public void runIntake() {
+        // Update jam detection ONCE per call
         updateJamDetection();
 
         if (!jammed) {
@@ -57,6 +58,7 @@ public class IntakeSubsystem {
     }
 
     public void runSpit() {
+        // Spit overrides jam protection
         intakeMotor.setPower(SPIT_INTAKE_POWER);
         transferMotor.setPower(SPIT_TRANSFER_POWER);
     }
@@ -71,6 +73,7 @@ public class IntakeSubsystem {
         transferMotor.setPower(0);
     }
 
+
     private void updateJamDetection() {
         double distance = intakeSensor.getDistance(DistanceUnit.CM);
 
@@ -82,18 +85,30 @@ public class IntakeSubsystem {
                 jammed = true;
             }
         } else {
+            // This will now correctly set jammed to false if the distance is > 17cm
             objectDetected = false;
             jammed = false;
             jamTimer.reset();
         }
     }
+    public void resetJam() {
+        this.jammed = false;
+        this.objectDetected = false;
+        // Reset the timer so it has to wait the full JAM_TIME again
+        // before it can decide it's jammed
+        jamTimer.reset();
+    }
 
+    // FIXED: Only call updateJamDetection in runIntake(), not here
+    // This prevents double-updating every loop cycle
     public boolean isJammed() {
-        updateJamDetection();
         return jammed;
     }
 
     public double getDistance() {
         return intakeSensor.getDistance(DistanceUnit.CM);
     }
-}
+
+    // Add this method to the bottom of IntakeSubsystem.java
+    // Inside IntakeSubsystem.java
+    }

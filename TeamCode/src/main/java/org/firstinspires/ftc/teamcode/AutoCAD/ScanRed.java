@@ -213,10 +213,11 @@ public class ScanRed extends OpMode {
 
             case 1: // Scan for AprilTag
                 if (!scanComplete) {
+                    // Continuously poll for tags
                     detectedTagId = limelight.detectAprilTag();
 
                     if (detectedTagId >= 21 && detectedTagId <= 23) {
-                        // Valid tag detected, build intake path
+                        // Valid tag detected
                         buildIntakePath(detectedTagId);
                         scanComplete = true;
                         setPathState(2);
@@ -227,9 +228,12 @@ public class ScanRed extends OpMode {
                         scanComplete = true;
                         setPathState(2);
                     }
+
+                    // Add telemetry to debug
+                    telemetry.addData("Scanning", "Looking for tags...");
+                    telemetry.addData("Has Detection", limelight.hasDetection());
                 }
                 break;
-
             case 2: // Move to intake position (with intake running)
                 if (!intakeStarted) {
                     speed = 0.7;

@@ -43,8 +43,8 @@ public class ScanBlue extends OpMode {
     private int detectedTagId = -1;
 
     // Shot power settings
-    private static final double OUTTAKE_MOTOR1_POWER = 0.7;
-    private static final double OUTTAKE_MOTOR2_POWER = 0.74;
+    private static final double OUTTAKE_MOTOR1_POWER = 0.75;
+    private static final double OUTTAKE_MOTOR2_POWER = 0.80;
     private final int SHOOTER_SPINUP_MS = 3000;
     private final int SHOOT_DURATION_MS = 2500;
 
@@ -209,10 +209,11 @@ public class ScanBlue extends OpMode {
 
             case 1: // Scan for AprilTag
                 if (!scanComplete) {
+                    // Continuously poll for tags
                     detectedTagId = limelight.detectAprilTag();
 
                     if (detectedTagId >= 21 && detectedTagId <= 23) {
-                        // Valid tag detected, build intake path
+                        // Valid tag detected
                         buildIntakePath(detectedTagId);
                         scanComplete = true;
                         setPathState(2);
@@ -223,6 +224,10 @@ public class ScanBlue extends OpMode {
                         scanComplete = true;
                         setPathState(2);
                     }
+
+                    // Add telemetry to debug
+                    telemetry.addData("Scanning", "Looking for tags...");
+                    telemetry.addData("Has Detection", limelight.hasDetection());
                 }
                 break;
 

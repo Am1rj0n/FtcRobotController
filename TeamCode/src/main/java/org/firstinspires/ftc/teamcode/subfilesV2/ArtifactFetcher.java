@@ -30,7 +30,7 @@ public class ArtifactFetcher {
     private boolean active = false;
     private boolean hasTarget = false;
 
-    // PID constants
+    // PID constants - Adjusted for smoother approach
     private static final double Pr = 0.003;
     private static final double Dr = 0.0003;
     private static final double Py = 0.002;
@@ -39,41 +39,32 @@ public class ArtifactFetcher {
     private static final double Dx = 0.0002;
 
     // Vision constants
-    private static final double CAM_CENTER = 160;
-    private static final double BLOB_RAD_GOAL = 200;
+    private static final double CAM_CENTER = 160;   // Center of 320px width
+    private static final double BLOB_RAD_GOAL = 200; // Radius when ball is at intake
 
     public ArtifactFetcher(HardwareMap hardwareMap, Follower follower) {
         this.follower = follower;
 
-        // Initialize purple locator
         purpleLocator = new ColorBlobLocatorProcessor.Builder()
                 .setTargetColorRange(ColorRange.ARTIFACT_PURPLE)
                 .setContourMode(ColorBlobLocatorProcessor.ContourMode.EXTERNAL_ONLY)
                 .setRoi(ImageRegion.entireFrame())
                 .setDrawContours(true)
-                .setBoxFitColor(0)
-                .setCircleFitColor(Color.rgb(255, 255, 0))
                 .setBlurSize(5)
                 .setDilateSize(15)
                 .setErodeSize(15)
-                .setMorphOperationType(ColorBlobLocatorProcessor.MorphOperationType.CLOSING)
                 .build();
 
-        // Initialize green locator
         greenLocator = new ColorBlobLocatorProcessor.Builder()
                 .setTargetColorRange(ColorRange.ARTIFACT_GREEN)
                 .setContourMode(ColorBlobLocatorProcessor.ContourMode.EXTERNAL_ONLY)
                 .setRoi(ImageRegion.entireFrame())
                 .setDrawContours(true)
-                .setBoxFitColor(0)
-                .setCircleFitColor(Color.rgb(255, 255, 0))
                 .setBlurSize(5)
                 .setDilateSize(15)
                 .setErodeSize(15)
-                .setMorphOperationType(ColorBlobLocatorProcessor.MorphOperationType.CLOSING)
                 .build();
 
-        // Initialize camera
         BlobCamera portal = new BlobCamera.Builder()
                 .setCamera(hardwareMap.get(WebcamName.class, "Webcam 1"))
                 .addProcessors(greenLocator, purpleLocator)
@@ -82,7 +73,6 @@ public class ArtifactFetcher {
                 .enableLiveView(true)
                 .build();
 
-        // Initialize PID controllers
         rotController = new PIDFController(new PIDFCoefficients(Pr, 0, Dr, 0));
         xController = new PIDFController(new PIDFCoefficients(Px, 0, Dx, 0));
         yController = new PIDFController(new PIDFCoefficients(Py, 0, Dy, 0));
@@ -91,10 +81,7 @@ public class ArtifactFetcher {
     public void toggle() {
         active = !active;
         if (!active) {
-            // Reset controllers when disabled
-            rotController.updateError(0);
-            yController.updateError(0);
-            xController.updateError(0);
+            stopMovement();
         }
     }
 
@@ -104,57 +91,59 @@ public class ArtifactFetcher {
             return;
         }
 
-        // Get all blobs (purple + green)
         List<ColorBlobLocatorProcessor.Blob> blobs = purpleLocator.getBlobs();
         blobs.addAll(greenLocator.getBlobs());
 
-        // Filter by size and circularity
         ColorBlobLocatorProcessor.Util.filterByCriteria(
-                ColorBlobLocatorProcessor.BlobCriteria.BY_CONTOUR_AREA,
-                100, 20000, blobs);
+                ColorBlobLocatorProcessor.BlobCriteria.BY_CONTOUR_AREA, 100, 20000, blobs);
 
         ColorBlobLocatorProcessor.Util.filterByCriteria(
-                ColorBlobLocatorProcessor.BlobCriteria.BY_CIRCULARITY,
-                0.5, 1, blobs);
+                ColorBlobLocatorProcessor.BlobCriteria.BY_CIRCULARITY, 0.5, 1, blobs);
 
-        // Sort by size (largest first)
         ColorBlobLocatorProcessor.Util.sortByCriteria(
-                ColorBlobLocatorProcessor.BlobCriteria.BY_CONTOUR_AREA,
-                SortOrder.DESCENDING, blobs);
+                ColorBlobLocatorProcessor.BlobCriteria.BY_CONTOUR_AREA, SortOrder.DESCENDING, blobs);
 
         if (!blobs.isEmpty()) {
             hasTarget = true;
+            ColorBlobLocatorProcessor.Blob target = blobs.get(0);
 
-            // Get errors
-            double Er = CAM_CENTER - blobs.get(0).getCircle().getX();
-            double Ey = BLOB_RAD_GOAL - blobs.get(0).getCircle().getRadius();
-            double Ex = CAM_CENTER - blobs.get(0).getCircle().getX();
+            // --- ERROR CALCULATIONS ---
 
-            // Update controllers
+            // 1. Rotation: (Center - CurrentX).
+            // If ball is at 200, Er = 160 - 200 = -40 (Turn right)
+            // 1. Rotation: Back to original (Center - Current)
+            // 1. Rotation: Back to original (Center - Current)
+            double Er = CAM_CENTER - target.getCircle().getX();
+
+// 2. Forward/Back: Keep the flip (Goal - Current)
+// This ensures: Radius 50 (far) -> 200 - 50 = +150 error -> Move Forward
+            double Ey = BLOB_RAD_GOAL - target.getCircle().getRadius();
+            // Update PID Controllers
             rotController.updateError(Er);
             yController.updateError(Ey);
-            xController.updateError(Ex);
+            xController.updateError(0); // Keeping strafe at 0 for stability
 
-            // Drive toward artifact (robot-centric)
+            // --- DRIVE COMMAND ---
+            // Pedro Pathing setTeleOpDrive(Forward/Back, Strafe, Turn, isRobotCentric)
             follower.setTeleOpDrive(
-                    yController.run(),
-                    xController.run(),
-                    rotController.run(),
-                    true // Robot-centric
+                    yController.run(),   // Forward Power
+                    0,                   // Strafe Power (set to 0 to prevent sliding)
+                    rotController.run(), // Turn Power
+                    true                 // Robot Centric is REQUIRED for this
             );
         } else {
             hasTarget = false;
-            rotController.updateError(0);
-            yController.updateError(0);
-            xController.updateError(0);
+            stopMovement();
         }
     }
 
-    public boolean isActive() {
-        return active;
+    private void stopMovement() {
+        rotController.updateError(0);
+        yController.updateError(0);
+        xController.updateError(0);
+        follower.setTeleOpDrive(0, 0, 0, true);
     }
 
-    public boolean hasTarget() {
-        return hasTarget;
-    }
+    public boolean isActive() { return active; }
+    public boolean hasTarget() { return hasTarget; }
 }

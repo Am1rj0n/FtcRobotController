@@ -1,11 +1,10 @@
 package org.firstinspires.ftc.teamcode;
 
-import static android.os.SystemClock.sleep;
-
 import com.qualcomm.robotcore.eventloop.opmode.OpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 import com.qualcomm.robotcore.util.ElapsedTime;
 
+import org.firstinspires.ftc.teamcode.paths.robotv2.ball12blueClose;
 import org.firstinspires.ftc.teamcode.subfilesV2.*;
 import org.firstinspires.ftc.teamcode.pedroPathing.Constants;
 import com.pedropathing.follower.Follower;
@@ -40,10 +39,13 @@ public class RedTele extends OpMode {
     private boolean lastR2 = false;
     private boolean lastDpadUp = false;
     private boolean lastLeftTrigger = false;
-
     private boolean lastTouchpad = false;
-
     private boolean lastCircle = false;
+    private boolean lastR3 = false;
+
+    // Time-based debouncing for shooter adjustments
+    private ElapsedTime gp2AdjustTimer = new ElapsedTime();
+    private static final double ADJUST_DELAY = 0.15;
 
     @Override
     public void init() {
@@ -73,6 +75,7 @@ public class RedTele extends OpMode {
         follower.startTeleopDrive();
         limelight.start();
         runtime.reset();
+        gp2AdjustTimer.reset();
     }
 
     @Override
@@ -116,8 +119,7 @@ public class RedTele extends OpMode {
         double strafe = gamepad1.left_stick_x;
         double turn = gamepad1.right_stick_x;
 
-        // --- TOUCHPAD: POSITION HOLD ---
-        // If the driver clicks the touchpad, toggle the lock
+        // --- TOUCHPAD: POSITION HOLD (TOGGLE) ---
         if (gamepad1.touchpad && !lastTouchpad) {
             drivetrain.toggleHold();
         }
@@ -126,17 +128,20 @@ public class RedTele extends OpMode {
         // --- SHARE/BACK: CORNER RESET ---
         if (gamepad1.share || gamepad1.back) {
             drivetrain.resetToCorner();
+            gamepad1.rumbleBlips(3);
         }
 
         // Speed control with bumpers
         if (gamepad1.left_bumper) drivetrain.decreaseSpeed();
         if (gamepad1.right_bumper) drivetrain.increaseSpeed();
 
-        // Slow mode on L3 (left stick button)
-        drivetrain.setSlowMode(gamepad1.left_stick_button);
-
-        // Field-centric reset on R3 (right stick button)
-        if (gamepad1.right_stick_button) drivetrain.resetFieldCentric();
+        // Field-centric reset on R3 (right stick button) with rumble
+        boolean r3 = gamepad1.right_stick_button;
+        if (r3 && !lastR3) {
+            drivetrain.resetFieldCentric();
+            gamepad1.rumble(200);
+        }
+        lastR3 = r3;
 
         // Goal tracking toggle (Options button)
         if (gamepad1.options) drivetrain.toggleGoalTracking();
@@ -151,7 +156,6 @@ public class RedTele extends OpMode {
         boolean cross = gamepad1.cross;
         boolean triangle = gamepad1.triangle;
         boolean circle = gamepad1.circle;
-
 
         if (square && !lastSquare) {
             currentMode = SystemMode.OFF;
@@ -196,8 +200,8 @@ public class RedTele extends OpMode {
             autoPosition.goToPark();
         }
 
-        // Cancel auto positioning with manual input or Circle button
-        if (gamepad1.circle || drivetrain.hasManualInput(gamepad1)) {
+        // Cancel auto positioning with manual input or L3
+        if (gamepad1.left_stick_button || drivetrain.hasManualInput(gamepad1)) {
             autoPosition.cancel();
         }
 
@@ -224,7 +228,11 @@ public class RedTele extends OpMode {
         // Update artifact fetcher
         if (artifactFetcher.isActive()) {
             artifactFetcher.update();
-            currentMode = SystemMode.INTAKE; // Auto-enable intake
+
+            // Auto-enable intake only if not jammed
+            if (currentMode == SystemMode.OFF && !intake.isJammed()) {
+                currentMode = SystemMode.INTAKE;
+            }
         }
     }
 
@@ -242,42 +250,46 @@ public class RedTele extends OpMode {
         if (gamepad2.left_trigger > 0.1) {
             shooter.setManualMode(true);
 
-            // D-Pad adjusts manual powers by ±5%
-            if (gamepad2.dpad_up) {
-                shooter.increaseManualBottomPower();
-                sleep(150);
-            }
-            if (gamepad2.dpad_down) {
-                shooter.decreaseManualBottomPower();
-                sleep(150);
-            }
-            if (gamepad2.dpad_right) {
-                shooter.increaseManualTopPower();
-                sleep(150);
-            }
-            if (gamepad2.dpad_left) {
-                shooter.decreaseManualTopPower();
-                sleep(150);
+            // D-Pad adjusts manual powers by ±5% (time-debounced)
+            if (gp2AdjustTimer.seconds() > ADJUST_DELAY) {
+                if (gamepad2.dpad_up) {
+                    shooter.increaseManualBottomPower();
+                    gp2AdjustTimer.reset();
+                }
+                if (gamepad2.dpad_down) {
+                    shooter.decreaseManualBottomPower();
+                    gp2AdjustTimer.reset();
+                }
+                if (gamepad2.dpad_right) {
+                    shooter.increaseManualTopPower();
+                    gp2AdjustTimer.reset();
+                }
+                if (gamepad2.dpad_left) {
+                    shooter.decreaseManualTopPower();
+                    gp2AdjustTimer.reset();
+                }
             }
         } else {
             shooter.setManualMode(false);
 
             // Machine Learning: Bumpers for top, D-Pad for bottom (±1%)
-            if (gamepad2.left_bumper) {
-                shooter.decreaseTopPower();
-                sleep(150);
-            }
-            if (gamepad2.right_bumper) {
-                shooter.increaseTopPower();
-                sleep(150);
-            }
-            if (gamepad2.dpad_down) {
-                shooter.decreaseBottomPower();
-                sleep(150);
-            }
-            if (gamepad2.dpad_up) {
-                shooter.increaseBottomPower();
-                sleep(150);
+            if (gp2AdjustTimer.seconds() > ADJUST_DELAY) {
+                if (gamepad2.left_bumper) {
+                    shooter.decreaseTopPower();
+                    gp2AdjustTimer.reset();
+                }
+                if (gamepad2.right_bumper) {
+                    shooter.increaseTopPower();
+                    gp2AdjustTimer.reset();
+                }
+                if (gamepad2.dpad_down) {
+                    shooter.decreaseBottomPower();
+                    gp2AdjustTimer.reset();
+                }
+                if (gamepad2.dpad_up) {
+                    shooter.increaseBottomPower();
+                    gp2AdjustTimer.reset();
+                }
             }
         }
     }
@@ -380,7 +392,7 @@ public class RedTele extends OpMode {
     // ==================== HELPER METHODS ====================
     private Pose getStartPoseFromAuto() {
         try {
-            Pose bluePose = org.firstinspires.ftc.teamcode.paths.robotv2.ball12blue.autoEndPose;
+            Pose bluePose = ball12blueClose.autoEndPose;
             if (bluePose != null && (bluePose.getX() != 0 || bluePose.getY() != 0)) {
                 return bluePose.mirror();
             }

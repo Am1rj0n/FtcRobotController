@@ -12,7 +12,7 @@ import com.qualcomm.robotcore.util.ElapsedTime;
 
 import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
 import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
-import org.firstinspires.ftc.teamcode.paths.robotv2.ball12blue;
+import org.firstinspires.ftc.teamcode.paths.robotv2.ball12blueClose;
 import org.firstinspires.ftc.teamcode.subsystems.DualMotorShooterHelper;
 import org.firstinspires.ftc.teamcode.pedroPathing.Constants;
 import com.pedropathing.follower.Follower;
@@ -173,12 +173,12 @@ public class EnhancedTele extends LinearOpMode {
             follower = Constants.createFollower(hardwareMap);
 
             // Load pose from autonomous
-            follower.setStartingPose(ball12blue.autoEndPose);
+            follower.setStartingPose(ball12blueClose.autoEndPose);
 
             telemetry.addLine("Pedro Pathing Initialized");
-            telemetry.addData("Auto End Pose X", ball12blue.autoEndPose.getX());
-            telemetry.addData("Auto End Pose Y", ball12blue.autoEndPose.getY());
-            telemetry.addData("Auto End Heading", Math.toDegrees(ball12blue.autoEndPose.getHeading()));
+            telemetry.addData("Auto End Pose X", ball12blueClose.autoEndPose.getX());
+            telemetry.addData("Auto End Pose Y", ball12blueClose.autoEndPose.getY());
+            telemetry.addData("Auto End Heading", Math.toDegrees(ball12blueClose.autoEndPose.getHeading()));
         } catch (Exception e) {
             telemetry.addLine("Pedro Pathing Init Failed: " + e.getMessage());
             follower = null;

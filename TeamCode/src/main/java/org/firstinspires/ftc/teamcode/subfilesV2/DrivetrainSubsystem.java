@@ -11,7 +11,7 @@ public class DrivetrainSubsystem {
     private final Follower follower;
     private final boolean isRed;
 
-    private double driveSpeed = 1.0;
+    private double driveSpeed = 0.7;
     private boolean slowMode = false;
     private boolean isHolding = false;
 
@@ -25,7 +25,7 @@ public class DrivetrainSubsystem {
 
     // Goal tracking
     private boolean goalTrackingEnabled = false;
-    private static final double GOAL_TRACK_P = 2.2;
+    private static final double GOAL_TRACK_P = 1.0;
     private static final double GOAL_TRACK_MAX_TURN = 0.6;
 
     // Red goal at (144, 144), Blue goal at (0, 144)
@@ -38,7 +38,7 @@ public class DrivetrainSubsystem {
     public DrivetrainSubsystem(HardwareMap hardwareMap, Follower follower, boolean isRed) {
         this.follower = follower;
         this.isRed = isRed;
-        GOAL_POSE = isRed ? new Pose(144, 144, 0) : new Pose(0, 144, 0);
+        GOAL_POSE = isRed ? new Pose(130, 137, 0) : new Pose(14, 144, 0);
     }
 
     public void drive(double forward, double strafe, double turn) {
@@ -56,8 +56,8 @@ public class DrivetrainSubsystem {
         double heading = follower.getPose().getHeading() - fieldCentricOffset;
 
         // Field-centric conversion
-        double rotX = strafe * Math.cos(-heading) - forward * Math.sin(-heading);
-        double rotY = strafe * Math.sin(-heading) + forward * Math.cos(-heading);
+        double rotX = forward * Math.cos(-heading) - strafe * Math.sin(-heading);
+        double rotY = forward * Math.sin(-heading) + strafe * Math.cos(-heading);
 
         // Apply speed multiplier
         double activeSpeed = slowMode ? SLOW_MODE_SPEED : driveSpeed;
@@ -70,7 +70,7 @@ public class DrivetrainSubsystem {
             turn = calculateGoalTrackingTurn();
         }
 
-        follower.setTeleOpDrive(rotY, rotX, turn, false);
+        follower.setTeleOpDrive(rotX, -rotY, -turn, false);
     }
 
     // ========== POSITION HOLD LOGIC ==========
@@ -112,8 +112,10 @@ public class DrivetrainSubsystem {
         double currentHeading = currentPose.getHeading();
         double error = normalizeAngle(targetHeading - currentHeading);
 
+        if (Math.abs(error) < 0.02) return 0;
+
         double turn = error * GOAL_TRACK_P;
-        return Math.max(-GOAL_TRACK_MAX_TURN, Math.min(GOAL_TRACK_MAX_TURN, turn));
+        return -Math.max(-GOAL_TRACK_MAX_TURN, Math.min(GOAL_TRACK_MAX_TURN, turn));
     }
 
     private double normalizeAngle(double angle) {

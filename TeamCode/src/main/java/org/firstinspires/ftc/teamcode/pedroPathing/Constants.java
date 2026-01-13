@@ -36,9 +36,9 @@ public class Constants {
     public static final double idleShootPower = 5000;     // Idle speed (0.2 power equivalent = ~360 RPM = 72 deg/s at 20% of 1800 RPM)
 
     public static FollowerConstants followerConstants = new FollowerConstants()
-            .mass(12.06)
-    .forwardZeroPowerAcceleration(-30.7819855)
-            .lateralZeroPowerAcceleration(-59.7816526)
+            .mass(10.9)
+        .forwardZeroPowerAcceleration(-29.1309918467)
+            .lateralZeroPowerAcceleration(-77.65507688407813)
 
 
            .translationalPIDFCoefficients(new PIDFCoefficients(
@@ -80,14 +80,14 @@ public class Constants {
 
 
 
-            .xVelocity(69.747625)
-            .yVelocity(57.903238);
+            .xVelocity(62.46352837029404)
+            .yVelocity(49.594572773129926);
 
     public static PinpointConstants localizerConstants = new PinpointConstants()
 
-            .forwardPodY(0)
-            .strafePodX(-4)
-            .forwardEncoderDirection(GoBildaPinpointDriver.EncoderDirection.FORWARD)
+            .forwardPodY(-2.125)
+            .strafePodX(-2.75)
+            .forwardEncoderDirection(GoBildaPinpointDriver.EncoderDirection.REVERSED)
             .strafeEncoderDirection(GoBildaPinpointDriver.EncoderDirection.REVERSED);
 
     public static PathConstraints pathConstraints = new PathConstraints(
