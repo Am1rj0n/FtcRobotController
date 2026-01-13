@@ -26,10 +26,10 @@ public class DualMotorShooterHelper {
     private static final double TICKS_PER_REV = 28.0;
 
     // Shot powers (adjustable)
-    public double closeMoitor1Power = 0.46; // Bottom motor close
-    public double closeMotor2Power = 0.57; // Top motor close
-    public double farMotor1Power = 0.7;   // Bottom motor far
-    public double farMotor2Power = 0.8;   // Top motor far
+    public double closeMoitor1Power = 0.55; // Bottom motor close
+    public double closeMotor2Power = 0.70; // Top motor close
+    public double farMotor1Power = 0.67;   // Bottom motor far
+    public double farMotor2Power = 0.67;   // Top motor far
 
     // Max velocity in degrees/sec
     // 5800 RPM = 5800 * 6 = 34,800 deg/min = 580 deg/sec

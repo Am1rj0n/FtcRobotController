@@ -18,7 +18,7 @@ public class IntakeSubsystem {
     private boolean objectDetected = false;
     private boolean jammed = false;
 
-    private static final double JAM_DISTANCE_CM = 10.0;
+    private static final double JAM_DISTANCE_CM = 18.0;
     private static final double JAM_TIME = 0.2;
 
     // Power values from EnhancedTele
@@ -29,7 +29,7 @@ public class IntakeSubsystem {
     private static final double SPIT_TRANSFER_POWER = -0.85;
 
     private static final double SHOOT_INTAKE_POWER = -0.55;
-    private static final double SHOOT_TRANSFER_POWER = 0.9;
+    private static final double SHOOT_TRANSFER_POWER = 0.5;
 
     public IntakeSubsystem(HardwareMap hardwareMap) {
         intakeMotor = hardwareMap.get(DcMotor.class, "intake_motor");

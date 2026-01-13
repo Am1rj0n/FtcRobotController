@@ -16,9 +16,10 @@ import java.util.HashMap;
 
 public class ShooterSubsystem {
 
-    private final DcMotorEx motor1;
-    private final DcMotorEx motor2;
-    private final PIDFController pidController;
+    private final DcMotorEx bottomMotor;  // outtakeMotor1
+    private final DcMotorEx topMotor;     // outtakeMotor2
+    private final PIDFController bottomPID;
+    private final PIDFController topPID;
 
     private boolean enabled = false;
     private boolean manualMode = false;
@@ -32,18 +33,26 @@ public class ShooterSubsystem {
     private static final double P = 0.008;
     private static final double I = 0.0003;
     private static final double D = 0.0001;
-    private static final double F = 0.0;
+    private static final double F = 0.00001;
 
     // Motor specs
     private static final double TICKS_PER_REV = 28.0;
     private static final double GEAR_RATIO = 1.0;
 
-    // Power settings from Constants
-    private static final double CLOSE_POWER = 0.44; // 16000 deg/s ≈ 2667 RPM ≈ 0.44 power
-    private static final double FAR_POWER = 0.78;   // 28000 deg/s ≈ 4667 RPM ≈ 0.78 power
+    // FAR MODE: Top=0.70, Bottom=0.75
+    private static final double FAR_TOP_POWER = 0.70;
+    private static final double FAR_BOTTOM_POWER = 0.75;
 
-    private double manualPower = 0.5;
-    private double currentPower = 0.0;
+    // CLOSE MODE: Top=0.85, Bottom=0.70
+    private static final double CLOSE_TOP_POWER = 0.85;
+    private static final double CLOSE_BOTTOM_POWER = 0.70;
+
+    // Manual mode powers (adjustable with D-Pad)
+    private double manualTopPower = 0.7;
+    private double manualBottomPower = 0.7;
+
+    private double currentTopPower = 0.0;
+    private double currentBottomPower = 0.0;
 
     private final ElapsedTime pidTimer = new ElapsedTime();
 
@@ -51,22 +60,23 @@ public class ShooterSubsystem {
     private static final double RPM_TOLERANCE = 50.0;
 
     public ShooterSubsystem(HardwareMap hardwareMap, boolean isRed) {
-        motor1 = hardwareMap.get(DcMotorEx.class, "outtakeMotor1");
-        motor2 = hardwareMap.get(DcMotorEx.class, "outtakeMotor2");
+        bottomMotor = hardwareMap.get(DcMotorEx.class, "outtakeMotor1");
+        topMotor = hardwareMap.get(DcMotorEx.class, "outtakeMotor2");
 
-        motor1.setDirection(DcMotorSimple.Direction.FORWARD);
-        motor2.setDirection(DcMotorSimple.Direction.FORWARD);
+        bottomMotor.setDirection(DcMotorSimple.Direction.FORWARD);
+        topMotor.setDirection(DcMotorSimple.Direction.FORWARD);
 
-        motor1.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
-        motor2.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
+        bottomMotor.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
+        topMotor.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
 
-        motor1.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
-        motor2.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
-        motor1.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
-        motor2.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+        bottomMotor.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
+        topMotor.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
+        bottomMotor.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+        topMotor.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
 
-        // Initialize FTCLib PIDFController
-        pidController = new PIDFController(P, I, D, F);
+        // Initialize FTCLib PIDFControllers
+        bottomPID = new PIDFController(P, I, D, F);
+        topPID = new PIDFController(P, I, D, F);
         pidTimer.reset();
 
         // Load saved adjustments
@@ -77,30 +87,48 @@ public class ShooterSubsystem {
 
     public void update() {
         if (!enabled) {
-            motor1.setPower(0);
-            motor2.setPower(0);
-            currentPower = 0;
+            bottomMotor.setPower(0);
+            topMotor.setPower(0);
+            currentTopPower = 0;
+            currentBottomPower = 0;
             return;
         }
 
-        double targetPower = manualMode ? manualPower : getAdjustedPower();
-        double targetRPM = powerToRPM(targetPower);
+        double targetTopPower, targetBottomPower;
+
+        if (manualMode) {
+            // Use manual powers set by D-Pad
+            targetTopPower = manualTopPower;
+            targetBottomPower = manualBottomPower;
+        } else {
+            // Use preset powers + adjustments
+            targetTopPower = getAdjustedTopPower();
+            targetBottomPower = getAdjustedBottomPower();
+        }
+
+        // Convert to RPM
+        double targetTopRPM = powerToRPM(targetTopPower);
+        double targetBottomRPM = powerToRPM(targetBottomPower);
 
         // Get current RPM
-        double rpm1 = getMotorRPM(motor1);
-        double rpm2 = getMotorRPM(motor2);
-        double avgRPM = (rpm1 + rpm2) / 2.0;
+        double topRPM = getMotorRPM(topMotor);
+        double bottomRPM = getMotorRPM(bottomMotor);
 
         // Calculate PID correction
-        double pidOutput = pidController.calculate(avgRPM, targetRPM);
+        double topPIDOutput = topPID.calculate(topRPM, targetTopRPM);
+        double bottomPIDOutput = bottomPID.calculate(bottomRPM, targetBottomRPM);
 
         // Apply feedforward + PID
-        double finalPower = targetPower + (pidOutput / 6000.0); // Scale PID to power range
-        finalPower = Math.max(0, Math.min(1.0, finalPower));
+        double finalTopPower = targetTopPower + (topPIDOutput / 6000.0);
+        double finalBottomPower = targetBottomPower + (bottomPIDOutput / 6000.0);
 
-        motor1.setPower(finalPower);
-        motor2.setPower(finalPower);
-        currentPower = finalPower;
+        finalTopPower = Math.max(0, Math.min(1.0, finalTopPower));
+        finalBottomPower = Math.max(0, Math.min(1.0, finalBottomPower));
+
+        topMotor.setPower(finalTopPower);
+        bottomMotor.setPower(finalBottomPower);
+        currentTopPower = finalTopPower;
+        currentBottomPower = finalBottomPower;
     }
 
     private double getMotorRPM(DcMotorEx motor) {
@@ -112,15 +140,67 @@ public class ShooterSubsystem {
         return power * 6000.0; // Assuming max RPM ~6000
     }
 
-    private String getAdjustmentKey() {
-        return isCloseMode ? "close" : "far";
-    }
-
-    private double getAdjustedPower() {
-        double basePower = isCloseMode ? CLOSE_POWER : FAR_POWER;
-        String key = getAdjustmentKey();
+    private double getAdjustedTopPower() {
+        double basePower = isCloseMode ? CLOSE_TOP_POWER : FAR_TOP_POWER;
+        String key = (isCloseMode ? "close" : "far") + "_top";
         return basePower + powerAdjustments.getOrDefault(key, 0.0);
     }
+
+    private double getAdjustedBottomPower() {
+        double basePower = isCloseMode ? CLOSE_BOTTOM_POWER : FAR_BOTTOM_POWER;
+        String key = (isCloseMode ? "close" : "far") + "_bottom";
+        return basePower + powerAdjustments.getOrDefault(key, 0.0);
+    }
+
+    // ==================== GAMEPAD 2 CONTROLS ====================
+
+    // Manual mode: Adjust by ±0.05 (5%)
+    public void increaseManualTopPower() {
+        manualTopPower = Math.min(manualTopPower + 0.05, 1.0);
+    }
+
+    public void decreaseManualTopPower() {
+        manualTopPower = Math.max(manualTopPower - 0.05, 0.0);
+    }
+
+    public void increaseManualBottomPower() {
+        manualBottomPower = Math.min(manualBottomPower + 0.05, 1.0);
+    }
+
+    public void decreaseManualBottomPower() {
+        manualBottomPower = Math.max(manualBottomPower - 0.05, 0.0);
+    }
+
+    // Machine learning: Adjust by ±0.01 (1%)
+    public void increaseTopPower() {
+        String key = (isCloseMode ? "close" : "far") + "_top";
+        double current = powerAdjustments.getOrDefault(key, 0.0);
+        powerAdjustments.put(key, Math.min(current + 0.01, 0.3));
+        saveAdjustments();
+    }
+
+    public void decreaseTopPower() {
+        String key = (isCloseMode ? "close" : "far") + "_top";
+        double current = powerAdjustments.getOrDefault(key, 0.0);
+        powerAdjustments.put(key, Math.max(current - 0.01, -0.3));
+        saveAdjustments();
+    }
+
+    public void increaseBottomPower() {
+        String key = (isCloseMode ? "close" : "far") + "_bottom";
+        double current = powerAdjustments.getOrDefault(key, 0.0);
+        powerAdjustments.put(key, Math.min(current + 0.01, 0.3));
+        saveAdjustments();
+    }
+
+    public void decreaseBottomPower() {
+        String key = (isCloseMode ? "close" : "far") + "_bottom";
+        double current = powerAdjustments.getOrDefault(key, 0.0);
+        powerAdjustments.put(key, Math.max(current - 0.01, -0.3));
+        saveAdjustments();
+    }
+
+    // ==================== MODE CONTROL ====================
 
     public void setCloseMode() {
         isCloseMode = true;
@@ -140,13 +220,15 @@ public class ShooterSubsystem {
 
     public void disable() {
         enabled = false;
-        pidController.reset();
+        bottomPID.reset();
+        topPID.reset();
     }
 
     public void toggle() {
         enabled = !enabled;
         if (!enabled) {
-            pidController.reset();
+            bottomPID.reset();
+            topPID.reset();
         }
     }
 
@@ -154,47 +236,50 @@ public class ShooterSubsystem {
         manualMode = manual;
     }
 
-    public void increaseManualPower() {
-        manualPower = Math.min(manualPower + 0.02, 1.0);
-    }
-
-    public void decreaseManualPower() {
-        manualPower = Math.max(manualPower - 0.02, 0.0);
-    }
-
-    public void increasePower() {
-        String key = getAdjustmentKey();
-        double current = powerAdjustments.getOrDefault(key, 0.0);
-        powerAdjustments.put(key, Math.min(current + 0.01, 0.3));
-        saveAdjustments();
-    }
-
-    public void decreasePower() {
-        String key = getAdjustmentKey();
-        double current = powerAdjustments.getOrDefault(key, 0.0);
-        powerAdjustments.put(key, Math.max(current - 0.01, -0.3));
-        saveAdjustments();
-    }
+    // ==================== STATUS QUERIES ====================
 
     public boolean isAtTarget() {
         if (!enabled) return false;
 
-        double targetRPM = powerToRPM(manualMode ? manualPower : getAdjustedPower());
-        double avgRPM = (getMotorRPM(motor1) + getMotorRPM(motor2)) / 2.0;
+        double targetTopRPM = powerToRPM(manualMode ? manualTopPower : getAdjustedTopPower());
+        double targetBottomRPM = powerToRPM(manualMode ? manualBottomPower : getAdjustedBottomPower());
 
-        return Math.abs(targetRPM - avgRPM) < RPM_TOLERANCE;
+        double topRPM = getMotorRPM(topMotor);
+        double bottomRPM = getMotorRPM(bottomMotor);
+
+        return Math.abs(targetTopRPM - topRPM) < RPM_TOLERANCE &&
+                Math.abs(targetBottomRPM - bottomRPM) < RPM_TOLERANCE;
     }
 
     public double getTargetRPM() {
-        return powerToRPM(manualMode ? manualPower : getAdjustedPower());
+        // Return average for display
+        double top = powerToRPM(manualMode ? manualTopPower : getAdjustedTopPower());
+        double bottom = powerToRPM(manualMode ? manualBottomPower : getAdjustedBottomPower());
+        return (top + bottom) / 2.0;
     }
 
     public double getCurrentRPM() {
-        return (getMotorRPM(motor1) + getMotorRPM(motor2)) / 2.0;
+        return (getMotorRPM(topMotor) + getMotorRPM(bottomMotor)) / 2.0;
     }
 
     public double getCurrentPower() {
-        return currentPower;
+        return (currentTopPower + currentBottomPower) / 2.0;
+    }
+
+    public double getTopPower() {
+        return currentTopPower;
+    }
+
+    public double getBottomPower() {
+        return currentBottomPower;
+    }
+
+    public double getManualTopPower() {
+        return manualTopPower;
+    }
+
+    public double getManualBottomPower() {
+        return manualBottomPower;
     }
 
     public boolean isEnabled() {
@@ -215,8 +300,8 @@ public class ShooterSubsystem {
 
     public void stop() {
         enabled = false;
-        motor1.setPower(0);
-        motor2.setPower(0);
+        bottomMotor.setPower(0);
+        topMotor.setPower(0);
         saveAdjustments();
     }
 
