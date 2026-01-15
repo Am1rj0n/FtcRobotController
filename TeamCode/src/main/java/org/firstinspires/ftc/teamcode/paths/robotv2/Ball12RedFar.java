@@ -18,9 +18,9 @@ import com.pedropathing.paths.PathChain;
 import com.pedropathing.geometry.Pose;
 import org.firstinspires.ftc.teamcode.subfilesV2.LightingSubsystem;
 
-@Autonomous(name = "12 Ball Blue Far - V3", group = "Autonomous")
+@Autonomous(name = "12 Ball Red Far - V3", group = "Autonomous")
 @Configurable
-public class Ball12BlueFar extends OpMode {
+public class Ball12RedFar extends OpMode {
 
     private TelemetryManager panelsTelemetry;
     public Follower follower;
@@ -69,7 +69,8 @@ public class Ball12BlueFar extends OpMode {
     public void init() {
         panelsTelemetry = PanelsTelemetry.INSTANCE.getTelemetry();
         follower = Constants.createFollower(hardwareMap);
-        follower.setStartingPose(new Pose(56, 8, Math.toRadians(90)));
+        Pose bluePose = new Pose(56, 8, Math.toRadians(90));
+        follower.setStartingPose(bluePose.mirror());
 
         paths = new Paths(follower);
 
@@ -311,48 +312,64 @@ public class Ball12BlueFar extends OpMode {
         public PathChain StartToShoot, Intakepos1, intake1, Shootpos, intakepos2, intake2, shootpos2, intakepos3, intake3, shootpos3, Leave;
 
         public Paths(Follower follower) {
+            Pose blueStart = new Pose(56, 8);
+            Pose blueShoot = new Pose(58.579, 13.828);
+            Pose blueIntake1Pre = new Pose(54.662, 30.166);
+            Pose blueIntake1PreAdjust = new Pose(54.662, 30.166);
+            Pose blueIntake1 = new Pose(22, 30.441);
+            Pose blueIntake1Adjust = new Pose(22, 30.441);
+            Pose blueIntake2Pre = new Pose(58.386, 50.931);
+            Pose blueIntake2 = new Pose(16.5, 50.952);
+            Pose blueIntake2Adjust = new Pose(28, 56.952);
+            Pose blueShoot2 = new Pose(58.607, 13.290);
+            Pose blueIntake3Pre = new Pose(58.262, 78.248);
+            Pose blueIntake3 = new Pose(26, 78.145);
+            Pose blueIntake3Adjust = new Pose(26, 80.145);
+            Pose blueShoot3 = new Pose(58.841, 13.221);
+            Pose blueLeave = new Pose(50.393, 22.331);
+
             StartToShoot = follower.pathBuilder().addPath(
-                    new BezierLine(new Pose(56, 8), new Pose(58.579, 13.828))
-            ).setLinearHeadingInterpolation(Math.toRadians(90), Math.toRadians(113.5)).build();
+                    new BezierLine(blueStart.mirror(), blueShoot.mirror())
+            ).setLinearHeadingInterpolation(Math.toRadians(90), Math.toRadians(66.5)).build();
 
             Intakepos1 = follower.pathBuilder().addPath(
-                    new BezierLine(new Pose(58.579, 13.828), new Pose(56.662, 31.166))
-            ).setLinearHeadingInterpolation(Math.toRadians(113.5), Math.toRadians(0)).build();
+                    new BezierLine(blueShoot.mirror(), blueIntake1Pre.mirror())
+            ).setLinearHeadingInterpolation(Math.toRadians(66.5), Math.toRadians(180)).build();
 
             intake1 = follower.pathBuilder().addPath(
-                    new BezierLine(new Pose(56.662, 33.166), new Pose(20, 33.441))
+                    new BezierLine(blueIntake1PreAdjust.mirror(), blueIntake1.mirror())
             ).setTangentHeadingInterpolation().setReversed().build();
 
             Shootpos = follower.pathBuilder().addPath(
-                    new BezierLine(new Pose(20, 33.441), new Pose(58.579, 13.828))
-            ).setLinearHeadingInterpolation(Math.toRadians(0), Math.toRadians(113.5)).build();
+                    new BezierLine(blueIntake1Adjust.mirror(), blueShoot.mirror())
+            ).setLinearHeadingInterpolation(Math.toRadians(180), Math.toRadians(66.5)).build();
 
             intakepos2 = follower.pathBuilder().addPath(
-                    new BezierLine(new Pose(58.579, 13.828), new Pose(58.386, 50.931))
-            ).setLinearHeadingInterpolation(Math.toRadians(113.5), Math.toRadians(0)).build();
+                    new BezierLine(blueShoot.mirror(), blueIntake2Pre.mirror())
+            ).setLinearHeadingInterpolation(Math.toRadians(66.5), Math.toRadians(180)).build();
 
             intake2 = follower.pathBuilder().addPath(
-                    new BezierLine(new Pose(58.386, 50.931), new Pose(29.186, 50.952))
+                    new BezierLine(blueIntake2Pre.mirror(), blueIntake2.mirror())
             ).setTangentHeadingInterpolation().setReversed().build();
 
             shootpos2 = follower.pathBuilder().addPath(
-                    new BezierLine(new Pose(29.186, 59.952), new Pose(58.607, 13.290))
-            ).setLinearHeadingInterpolation(Math.toRadians(0), Math.toRadians(113.5)).build();
+                    new BezierLine(blueIntake2Adjust.mirror(), blueShoot2.mirror())
+            ).setLinearHeadingInterpolation(Math.toRadians(180), Math.toRadians(66.5)).build();
 
             intakepos3 = follower.pathBuilder().addPath(
-                    new BezierLine(new Pose(58.607, 13.290), new Pose(58.262, 78.248))
-            ).setLinearHeadingInterpolation(Math.toRadians(113.5), Math.toRadians(0)).build();
+                    new BezierLine(blueShoot2.mirror(), blueIntake3Pre.mirror())
+            ).setLinearHeadingInterpolation(Math.toRadians(66.5), Math.toRadians(180)).build();
 
             intake3 = follower.pathBuilder().addPath(
-                    new BezierLine(new Pose(58.262, 78.248), new Pose(26, 78.145))
+                    new BezierLine(blueIntake3Pre.mirror(), blueIntake3.mirror())
             ).setTangentHeadingInterpolation().setReversed().build();
 
             shootpos3 = follower.pathBuilder().addPath(
-                    new BezierLine(new Pose(26, 80.145), new Pose(58.841, 13.221))
-            ).setLinearHeadingInterpolation(Math.toRadians(0), Math.toRadians(114.5)).build();
+                    new BezierLine(blueIntake3Adjust.mirror(), blueShoot3.mirror())
+            ).setLinearHeadingInterpolation(Math.toRadians(180), Math.toRadians(65.5)).build();
 
             Leave = follower.pathBuilder().addPath(
-                    new BezierLine(new Pose(58.841, 13.221), new Pose(50.393, 22.331))
+                    new BezierLine(blueShoot3.mirror(), blueLeave.mirror())
             ).setTangentHeadingInterpolation().build();
         }
     }

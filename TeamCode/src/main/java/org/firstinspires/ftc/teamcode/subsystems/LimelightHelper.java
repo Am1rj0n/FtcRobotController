@@ -24,7 +24,7 @@ public class LimelightHelper {
         limelight = hardwareMap.get(Limelight3A.class, "limelight");
 
         // Switch to pipeline 0 for AprilTag detection
-        limelight.pipelineSwitch(0);
+        limelight.pipelineSwitch(1);
 
         // Start the Limelight
         limelight.start();

@@ -19,7 +19,9 @@ public class IntakeSubsystem {
     private boolean jammed = false;
 
     private static final double JAM_DISTANCE_CM = 17.0;
-    private static final double JAM_TIME = 0.3;
+    private static final double JAM_TIME = 0.7;
+    // Add clearance threshold - object must move away before unjamming
+    private static final double CLEAR_DISTANCE_CM = 20.0;
 
     // Power values from EnhancedTele
     private static final double INTAKE_POWER = -1.0;
@@ -58,12 +60,15 @@ public class IntakeSubsystem {
     }
 
     public void runSpit() {
-        // Spit overrides jam protection
+        // Clear jam status when spitting
+        resetJam();
         intakeMotor.setPower(SPIT_INTAKE_POWER);
         transferMotor.setPower(SPIT_TRANSFER_POWER);
     }
 
     public void runShoot() {
+        // Clear jam status when shooting
+        resetJam();
         intakeMotor.setPower(SHOOT_INTAKE_POWER);
         transferMotor.setPower(SHOOT_TRANSFER_POWER);
     }
@@ -73,34 +78,32 @@ public class IntakeSubsystem {
         transferMotor.setPower(0);
     }
 
-
     private void updateJamDetection() {
         double distance = intakeSensor.getDistance(DistanceUnit.CM);
 
+        // FIXED: Two-threshold system for jam detection
         if (distance < JAM_DISTANCE_CM) {
             if (!objectDetected) {
                 objectDetected = true;
                 jamTimer.reset();
-            } else if (jamTimer.seconds() > JAM_TIME) {
+            } else if (jamTimer.seconds() > JAM_TIME && !jammed) {
                 jammed = true;
             }
-        } else {
-            // This will now correctly set jammed to false if the distance is > 17cm
+        } else if (distance > CLEAR_DISTANCE_CM) {
+            // Only clear jam when object is fully away (20cm+)
             objectDetected = false;
             jammed = false;
             jamTimer.reset();
         }
+        // Between 17-20cm: maintain current state (hysteresis)
     }
+
     public void resetJam() {
         this.jammed = false;
         this.objectDetected = false;
-        // Reset the timer so it has to wait the full JAM_TIME again
-        // before it can decide it's jammed
         jamTimer.reset();
     }
 
-    // FIXED: Only call updateJamDetection in runIntake(), not here
-    // This prevents double-updating every loop cycle
     public boolean isJammed() {
         return jammed;
     }
@@ -108,7 +111,4 @@ public class IntakeSubsystem {
     public double getDistance() {
         return intakeSensor.getDistance(DistanceUnit.CM);
     }
-
-    // Add this method to the bottom of IntakeSubsystem.java
-    // Inside IntakeSubsystem.java
-    }
+}

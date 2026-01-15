@@ -1,11 +1,9 @@
 package org.firstinspires.ftc.teamcode.subfilesV2;
 
-import com.arcrobotics.ftclib.controller.PIDFController;
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DcMotorEx;
 import com.qualcomm.robotcore.hardware.DcMotorSimple;
 import com.qualcomm.robotcore.hardware.HardwareMap;
-import com.qualcomm.robotcore.util.ElapsedTime;
 
 import java.io.File;
 import java.io.FileWriter;
@@ -14,12 +12,10 @@ import java.io.FileReader;
 import java.io.IOException;
 import java.util.HashMap;
 
-public class ShooterSubsystem {
+public class shootersubv2 {
 
     private final DcMotorEx bottomMotor;  // outtakeMotor1
     private final DcMotorEx topMotor;     // outtakeMotor2
-    private final PIDFController bottomPID;
-    private final PIDFController topPID;
 
     private boolean enabled = false;
     private boolean manualMode = false;
@@ -29,36 +25,18 @@ public class ShooterSubsystem {
     private final HashMap<String, Double> powerAdjustments = new HashMap<>();
     private final File saveFile;
 
-    // FTCLib PIDF coefficients
-    private static final double P = 0.008;
-    private static final double I = 0.0003;
-    private static final double D = 0.0001;
-    private static final double F = 0.00001;
-
-    // Motor specs
-    private static final double TICKS_PER_REV = 28.0;
-    private static final double GEAR_RATIO = 1.0;
-
-    // FAR MODE: Top=0.70, Bottom=0.75
+    // FAR MODE: Top=0.67, Bottom=0.70
     private static final double FAR_TOP_POWER = 0.67;
     private static final double FAR_BOTTOM_POWER = 0.70;
 
     // CLOSE MODE: Top=0.85, Bottom=0.70
-    private static final double CLOSE_TOP_POWER = 0.85;
-    private static final double CLOSE_BOTTOM_POWER = 0.7;
+    private static final double CLOSE_TOP_POWER = 0.6;
+    private static final double CLOSE_BOTTOM_POWER = 0.6;
 
     // Manual mode power (BOTH motors use same value now)
     private double manualBothPower = 0.7;
 
-    private double currentTopPower = 0.0;
-    private double currentBottomPower = 0.0;
-
-    private final ElapsedTime pidTimer = new ElapsedTime();
-
-    // At-target detection
-    private static final double RPM_TOLERANCE = 50.0;
-
-    public ShooterSubsystem(HardwareMap hardwareMap, boolean isRed) {
+    public shootersubv2 (HardwareMap hardwareMap, boolean isRed) {
         bottomMotor = hardwareMap.get(DcMotorEx.class, "outtakeMotor1");
         topMotor = hardwareMap.get(DcMotorEx.class, "outtakeMotor2");
 
@@ -70,13 +48,8 @@ public class ShooterSubsystem {
 
         bottomMotor.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
         topMotor.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
-        bottomMotor.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
-        topMotor.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
-
-        // Initialize FTCLib PIDFControllers
-        bottomPID = new PIDFController(P, I, D, F);
-        topPID = new PIDFController(P, I, D, F);
-        pidTimer.reset();
+        bottomMotor.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
+        topMotor.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
 
         // Load saved adjustments
         String filename = isRed ? "shooter_red.txt" : "shooter_blue.txt";
@@ -84,59 +57,30 @@ public class ShooterSubsystem {
         loadAdjustments();
     }
 
-    public void update() {
-        if (!enabled) {
-            bottomMotor.setPower(0);
-            topMotor.setPower(0);
-            currentTopPower = 0;
-            currentBottomPower = 0;
-            return;
-        }
+    // Method to get motor references for direct control from TeleOp
+    public DcMotorEx getTopMotor() {
+        return topMotor;
+    }
 
-        double targetTopPower, targetBottomPower;
+    public DcMotorEx getBottomMotor() {
+        return bottomMotor;
+    }
 
+    // Get the target powers (with adjustments)
+    public double getTargetTopPower() {
         if (manualMode) {
-            // Use same manual power for both motors
-            targetTopPower = manualBothPower;
-            targetBottomPower = manualBothPower;
+            return manualBothPower;
         } else {
-            // Use preset powers + adjustments
-            targetTopPower = getAdjustedTopPower();
-            targetBottomPower = getAdjustedBottomPower();
+            return getAdjustedTopPower();
         }
-
-        // Convert to RPM
-        double targetTopRPM = powerToRPM(targetTopPower);
-        double targetBottomRPM = powerToRPM(targetBottomPower);
-
-        // Get current RPM
-        double topRPM = getMotorRPM(topMotor);
-        double bottomRPM = getMotorRPM(bottomMotor);
-
-        // Calculate PID correction
-        double topPIDOutput = topPID.calculate(topRPM, targetTopRPM);
-        double bottomPIDOutput = bottomPID.calculate(bottomRPM, targetBottomRPM);
-
-        // Apply feedforward + PID
-        double finalTopPower = targetTopPower + (topPIDOutput / 6000.0);
-        double finalBottomPower = targetBottomPower + (bottomPIDOutput / 6000.0);
-
-        finalTopPower = Math.max(0, Math.min(1.0, finalTopPower));
-        finalBottomPower = Math.max(0, Math.min(1.0, finalBottomPower));
-
-        topMotor.setPower(finalTopPower);
-        bottomMotor.setPower(finalBottomPower);
-        currentTopPower = finalTopPower;
-        currentBottomPower = finalBottomPower;
     }
 
-    private double getMotorRPM(DcMotorEx motor) {
-        double velocity = motor.getVelocity(); // ticks per second
-        return (velocity * 60.0) / (TICKS_PER_REV * GEAR_RATIO);
-    }
-
-    private double powerToRPM(double power) {
-        return power * 6000.0; // Assuming max RPM ~6000
+    public double getTargetBottomPower() {
+        if (manualMode) {
+            return manualBothPower;
+        } else {
+            return getAdjustedBottomPower();
+        }
     }
 
     private double getAdjustedTopPower() {
@@ -205,16 +149,10 @@ public class ShooterSubsystem {
 
     public void disable() {
         enabled = false;
-        bottomPID.reset();
-        topPID.reset();
     }
 
     public void toggle() {
         enabled = !enabled;
-        if (!enabled) {
-            bottomPID.reset();
-            topPID.reset();
-        }
     }
 
     public void setManualMode(boolean manual) {
@@ -222,35 +160,6 @@ public class ShooterSubsystem {
     }
 
     // ==================== STATUS QUERIES ====================
-
-    public boolean isAtTarget() {
-        if (!enabled) return false;
-
-        double targetTopRPM = powerToRPM(manualMode ? manualBothPower : getAdjustedTopPower());
-        double targetBottomRPM = powerToRPM(manualMode ? manualBothPower : getAdjustedBottomPower());
-
-        double topRPM = getMotorRPM(topMotor);
-        double bottomRPM = getMotorRPM(bottomMotor);
-
-        return Math.abs(targetTopRPM - topRPM) < RPM_TOLERANCE &&
-                Math.abs(targetBottomRPM - bottomRPM) < RPM_TOLERANCE;
-    }
-
-    public double getCurrentRPM() {
-        return (getMotorRPM(topMotor) + getMotorRPM(bottomMotor)) / 2.0;
-    }
-
-    public double getCurrentPower() {
-        return (currentTopPower + currentBottomPower) / 2.0;
-    }
-
-    public double getTopPower() {
-        return currentTopPower;
-    }
-
-    public double getBottomPower() {
-        return currentBottomPower;
-    }
 
     public double getManualBothPower() {
         return manualBothPower;

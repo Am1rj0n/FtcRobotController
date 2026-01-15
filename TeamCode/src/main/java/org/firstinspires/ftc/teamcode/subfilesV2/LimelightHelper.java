@@ -22,15 +22,16 @@ public class LimelightHelper {
     private static final int RED_SHOOT_TAG = 24;
     private static final int BLUE_SHOOT_TAG = 20;
 
-    // Update localization every 3 seconds
-    private static final double UPDATE_INTERVAL = 3.0;
+    // Localization tuning
+    private static final double UPDATE_INTERVAL = 1.0; // seconds
     private static final double LOCALIZATION_WEIGHT = 0.3;
+    private static final double MAX_JUMP_INCHES = 12.0;
 
     public LimelightHelper(HardwareMap hardwareMap, boolean isRed) {
         this.isRed = isRed;
         limelight = hardwareMap.get(Limelight3A.class, "limelight");
         limelight.setPollRateHz(20);
-        limelight.pipelineSwitch(0); // Pipeline 0 for AprilTags
+        limelight.pipelineSwitch(1); // AprilTag pipeline
     }
 
     public void start() {
@@ -41,97 +42,78 @@ public class LimelightHelper {
         limelight.stop();
     }
 
-    // Get distance from shooting tag (in inches)
+    // ===================== SHOOTING TAG =====================
+
     public double getDistanceFromShoot() {
         int targetTag = isRed ? RED_SHOOT_TAG : BLUE_SHOOT_TAG;
         LLResult result = limelight.getLatestResult();
 
-        if (result == null || !result.isValid()) {
-            return 0;
-        }
+        if (result == null || !result.isValid()) return 0;
 
         List<LLResultTypes.FiducialResult> fiducials = result.getFiducialResults();
-        if (fiducials.isEmpty()) {
-            return 0;
-        }
+        if (fiducials.isEmpty()) return 0;
 
         for (LLResultTypes.FiducialResult fiducial : fiducials) {
             if (fiducial != null && fiducial.getFiducialId() == targetTag) {
-                // Get camera pose in target space (most useful)
                 Pose3D cameraPose = fiducial.getCameraPoseTargetSpace();
                 if (cameraPose != null) {
                     double x = cameraPose.getPosition().x / DistanceUnit.mPerInch;
                     double z = cameraPose.getPosition().z / DistanceUnit.mPerInch;
-                    return Math.sqrt(x*x + z*z);
+                    return Math.sqrt(x * x + z * z);
                 }
             }
         }
-
         return 0;
     }
 
-    // Get angle from shooting tag (in degrees)
     public double getAngleFromShoot() {
         int targetTag = isRed ? RED_SHOOT_TAG : BLUE_SHOOT_TAG;
         LLResult result = limelight.getLatestResult();
 
-        if (result == null || !result.isValid()) {
-            return 0;
-        }
+        if (result == null || !result.isValid()) return 0;
 
-        List<LLResultTypes.FiducialResult> fiducials = result.getFiducialResults();
-        if (fiducials.isEmpty()) {
-            return 0;
-        }
-
-        for (LLResultTypes.FiducialResult fiducial : fiducials) {
+        for (LLResultTypes.FiducialResult fiducial : result.getFiducialResults()) {
             if (fiducial != null && fiducial.getFiducialId() == targetTag) {
                 return fiducial.getTargetXDegrees();
             }
         }
-
         return 0;
     }
 
-    // Update robot pose using Limelight (like Barron's code)
+    // ===================== LOCALIZATION =====================
+
     public void updateLocalization(Follower follower, double currentTime) {
-        // Only update every UPDATE_INTERVAL seconds
-        if (currentTime - lastUpdateTime < UPDATE_INTERVAL) {
-            return;
-        }
+
+        if (currentTime - lastUpdateTime < UPDATE_INTERVAL) return;
 
         LLResult result = limelight.getLatestResult();
-        if (result == null || !result.isValid()) {
-            return;
-        }
+        if (result == null || !result.isValid()) return;
 
-        // Get botpose from Limelight (MegaTag 1)
+        // FTC SDK uses getBotpose() for MegaTag 1
         Pose3D botpose = result.getBotpose();
-        if (botpose == null) {
-            return;
-        }
+        if (botpose == null) return;
 
-        // Check if we have enough tags for reliable data
         int tagCount = result.getBotposeTagCount();
-        if (tagCount < 1) {
-            return;
-        }
+        if (tagCount < 1) return;
 
-        // Extract X, Y from botpose
-        double ll_x = botpose.getPosition().x;
-        double ll_y = botpose.getPosition().y;
-
-        // Get current follower pose
         Pose currentPose = follower.getPose();
 
-        // Weighted average (30% Limelight, 70% Pinpoint Odometry)
-        double corrected_x = currentPose.getX() * (1 - LOCALIZATION_WEIGHT) + ll_x * LOCALIZATION_WEIGHT;
-        double corrected_y = currentPose.getY() * (1 - LOCALIZATION_WEIGHT) + ll_y * LOCALIZATION_WEIGHT;
+        // Convert meters → inches
+        double ll_x = botpose.getPosition().x / DistanceUnit.mPerInch;
+        double ll_y = botpose.getPosition().y / DistanceUnit.mPerInch;
 
-        // Update follower pose (keep current heading - don't trust Limelight heading)
-        Pose correctedPose = new Pose(corrected_x, corrected_y, currentPose.getHeading());
-        follower.setPose(correctedPose);
+        // Reject large jumps
+        if (Math.hypot(ll_x - currentPose.getX(),
+                ll_y - currentPose.getY()) > MAX_JUMP_INCHES) {
+            return;
+        }
 
+        double corrected_x =
+                currentPose.getX() * (1 - LOCALIZATION_WEIGHT) + ll_x * LOCALIZATION_WEIGHT;
+        double corrected_y =
+                currentPose.getY() * (1 - LOCALIZATION_WEIGHT) + ll_y * LOCALIZATION_WEIGHT;
+
+        follower.setPose(new Pose(corrected_x, corrected_y, currentPose.getHeading()));
         lastUpdateTime = currentTime;
     }
 

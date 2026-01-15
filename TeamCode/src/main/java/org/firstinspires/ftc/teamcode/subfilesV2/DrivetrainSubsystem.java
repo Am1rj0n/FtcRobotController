@@ -25,20 +25,23 @@ public class DrivetrainSubsystem {
 
     // Goal tracking
     private boolean goalTrackingEnabled = false;
-    private static final double GOAL_TRACK_P = 1.0;
-    private static final double GOAL_TRACK_MAX_TURN = 0.6;
+    private static final double GOAL_TRACK_P = 1.20; //was 0.95
+    private static final double GOAL_TRACK_MAX_TURN = 0.8;
+    // ADDED: Goal alignment tolerance (in radians, 0 degrees)
+    private static final double GOAL_ALIGN_TOLERANCE = Math.toRadians(0);
 
     // Red goal at (144, 144), Blue goal at (0, 144)
     private final Pose GOAL_POSE;
 
-    // Corner Reset Positions (Based on your request)
+    // Corner Reset Positions
     private static final Pose RED_CORNER = new Pose(9, 8, Math.toRadians(0));
     private static final Pose BLUE_CORNER = new Pose(135, 8, Math.toRadians(180));
 
     public DrivetrainSubsystem(HardwareMap hardwareMap, Follower follower, boolean isRed) {
         this.follower = follower;
         this.isRed = isRed;
-        GOAL_POSE = isRed ? new Pose(130, 137, 0) : new Pose(14, 144, 0);
+        // Blue goal at top-left (14, 144), Red goal at top-right (130, 144)
+        GOAL_POSE = isRed ? new Pose(144, 144, 0) : new Pose(0, 144, 0);
     }
 
     public void drive(double forward, double strafe, double turn) {
@@ -116,6 +119,22 @@ public class DrivetrainSubsystem {
 
         double turn = error * GOAL_TRACK_P;
         return -Math.max(-GOAL_TRACK_MAX_TURN, Math.min(GOAL_TRACK_MAX_TURN, turn));
+    }
+
+    // ADDED: Check if robot is aligned with goal
+    public boolean isAlignedWithGoal() {
+        if (!goalTrackingEnabled) return false;
+
+        Pose currentPose = follower.getPose();
+        double targetHeading = Math.atan2(
+                GOAL_POSE.getY() - currentPose.getY(),
+                GOAL_POSE.getX() - currentPose.getX()
+        );
+
+        double currentHeading = currentPose.getHeading();
+        double error = Math.abs(normalizeAngle(targetHeading - currentHeading));
+
+        return error < GOAL_ALIGN_TOLERANCE;
     }
 
     private double normalizeAngle(double angle) {

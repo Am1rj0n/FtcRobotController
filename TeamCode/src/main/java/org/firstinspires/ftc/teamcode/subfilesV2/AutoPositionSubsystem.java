@@ -16,7 +16,7 @@ public class AutoPositionSubsystem {
     // Blue alliance positions (from TeleOpFix)
     private static final Pose BLUE_PARK = new Pose(105.103, 32.938, Math.toRadians(90));
     private static final Pose BLUE_CLOSE_SHOOT = new Pose(57.766, 86.731, Math.toRadians(134));
-    private static final Pose BLUE_FAR_SHOOT = new Pose(57.766, 86.731, Math.toRadians(134)); // Same as close for now
+    private static final Pose BLUE_FAR_SHOOT = new Pose(57.766, 86.731, Math.toRadians(113.5)); // Same as close for now
 
     // Red alliance positions (mirrored)
     private static final Pose RED_PARK = BLUE_PARK.mirror();

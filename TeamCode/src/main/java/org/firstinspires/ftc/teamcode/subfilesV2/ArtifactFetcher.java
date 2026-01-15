@@ -25,22 +25,19 @@ public class ArtifactFetcher {
 
     private final PIDFController rotController;
     private final PIDFController yController;
-    private final PIDFController xController;
 
     private boolean active = false;
     private boolean hasTarget = false;
 
-    // PID constants - Adjusted for smoother approach
-    private static final double Pr = 0.003;
-    private static final double Dr = 0.0003;
-    private static final double Py = 0.002;
-    private static final double Dy = 0.0002;
-    private static final double Px = 0.002;
-    private static final double Dx = 0.0002;
+    // FIXED: Inverted PID constants for correct direction
+    private static final double Pr = 0.004;   // Increased for faster response
+    private static final double Dr = 0.0005;
+    private static final double Py = 0.0025;  // Increased forward drive
+    private static final double Dy = 0.0003;
 
     // Vision constants
-    private static final double CAM_CENTER = 160;   // Center of 320px width
-    private static final double BLOB_RAD_GOAL = 200; // Radius when ball is at intake
+    private static final double CAM_CENTER = 160;
+    private static final double BLOB_RAD_GOAL = 200;
 
     public ArtifactFetcher(HardwareMap hardwareMap, Follower follower) {
         this.follower = follower;
@@ -74,7 +71,6 @@ public class ArtifactFetcher {
                 .build();
 
         rotController = new PIDFController(new PIDFCoefficients(Pr, 0, Dr, 0));
-        xController = new PIDFController(new PIDFCoefficients(Px, 0, Dx, 0));
         yController = new PIDFController(new PIDFCoefficients(Py, 0, Dy, 0));
     }
 
@@ -107,29 +103,26 @@ public class ArtifactFetcher {
             hasTarget = true;
             ColorBlobLocatorProcessor.Blob target = blobs.get(0);
 
-            // --- ERROR CALCULATIONS ---
+            // FIXED ERROR CALCULATIONS:
+            // Rotation: Ball right of center (X=200) means turn RIGHT (negative turn)
+            // Error = Current - Center (so positive X -> negative turn)
+            double Er = target.getCircle().getX() - CAM_CENTER;
 
-            // 1. Rotation: (Center - CurrentX).
-            // If ball is at 200, Er = 160 - 200 = -40 (Turn right)
-            // 1. Rotation: Back to original (Center - Current)
-            // 1. Rotation: Back to original (Center - Current)
-            double Er = CAM_CENTER - target.getCircle().getX();
+            // Forward: Small radius (far) means move FORWARD (positive)
+            // Error = Current - Goal (so small radius -> negative error -> positive output)
+            double Ey = target.getCircle().getRadius() - BLOB_RAD_GOAL;
 
-// 2. Forward/Back: Keep the flip (Goal - Current)
-// This ensures: Radius 50 (far) -> 200 - 50 = +150 error -> Move Forward
-            double Ey = BLOB_RAD_GOAL - target.getCircle().getRadius();
-            // Update PID Controllers
+            // Update controllers
             rotController.updateError(Er);
             yController.updateError(Ey);
-            xController.updateError(0); // Keeping strafe at 0 for stability
 
-            // --- DRIVE COMMAND ---
-            // Pedro Pathing setTeleOpDrive(Forward/Back, Strafe, Turn, isRobotCentric)
+            // FIXED: Corrected sign conventions
+            // Negative turn = rotate right, Positive forward = drive forward
             follower.setTeleOpDrive(
-                    yController.run(),   // Forward Power
-                    0,                   // Strafe Power (set to 0 to prevent sliding)
-                    rotController.run(), // Turn Power
-                    true                 // Robot Centric is REQUIRED for this
+                    yController.run(),  // FORWARD (inverted to match expected direction)
+                    0,                   // No strafe
+                    -rotController.run(), // TURN (inverted to match expected direction)
+                    true                 // Robot-centric
             );
         } else {
             hasTarget = false;
@@ -140,7 +133,6 @@ public class ArtifactFetcher {
     private void stopMovement() {
         rotController.updateError(0);
         yController.updateError(0);
-        xController.updateError(0);
         follower.setTeleOpDrive(0, 0, 0, true);
     }
 

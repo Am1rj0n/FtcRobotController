@@ -11,74 +11,66 @@ import com.bylazar.telemetry.TelemetryManager;
 import com.bylazar.telemetry.PanelsTelemetry;
 
 import org.firstinspires.ftc.teamcode.pedroPathing.Constants;
+import com.pedropathing.follower.Follower;
 import com.pedropathing.geometry.BezierCurve;
 import com.pedropathing.geometry.BezierLine;
-import com.pedropathing.follower.Follower;
-import com.pedropathing.paths.PathChain;
 import com.pedropathing.geometry.Pose;
+import com.pedropathing.paths.PathChain;
 import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
 
-// Integration with your SubfilesV2
 import org.firstinspires.ftc.teamcode.subfilesV2.ShooterSubsystem;
-import org.firstinspires.ftc.teamcode.subfilesV2.LightingSubsystem; // LIGHTS ADDED
+import org.firstinspires.ftc.teamcode.subfilesV2.LightingSubsystem;
 
-@Autonomous(name = "12 Ball Blue - Full Conversion", group = "Autonomous")
+@Autonomous(name = "12 Ball Blue - CLOSE", group = "Autonomous")
 @Configurable
 public class ball12blueClose extends OpMode {
 
-    // Pose handoff for TeleOp
     public static Pose autoEndPose = new Pose(0, 0, 0);
 
-    /* ================= SUBSYSTEMS & TOOLS ================= */
     private TelemetryManager panelsTelemetry;
     public Follower follower;
     private Paths paths;
     private ShooterSubsystem shooter;
-
-    private DcMotor intakeMotor;
-    private DcMotor transferMotor;
+    private DcMotor intakeMotor, transferMotor;
     private DistanceSensor intakeSensor;
     private LightingSubsystem lights;
 
-    /* ================= TIMERS & VARS ================= */
     private ElapsedTime shootTimer = new ElapsedTime();
     private ElapsedTime jamTimer = new ElapsedTime();
-    private int pathState;
 
     private boolean objectDetected = false;
     private boolean jammed = false;
 
-    // Constants
-    private static final double JAM_DISTANCE_CM = 10.0;
-    private static final double JAM_TIME = 0.2;
-    private static final double SHOOT_DURATION = 2.0; // 2 seconds per volley
+    // Motor Power Constants
+    private static final double INTAKE_POWER = -1.0;
+    private static final double INTAKE_TRANSFER_POWER = -0.15;
+    private static final double SPIT_INTAKE_POWER = 0.9;
+    private static final double SPIT_TRANSFER_POWER = -0.85;
+    private static final double SHOOT_INTAKE_POWER = -0.55;
+    private static final double SHOOT_TRANSFER_POWER = 0.5;
+
+    // Tuning Constants
+    private static final double JAM_DISTANCE_CM = 12.0;
+    private static final double JAM_TIME = 0.46;
+    private static final double SHOOT_DURATION = 2.0;
 
     private enum AutoState {
-        PRELOAD_SHOOT,
-        INTAKE_1,
-        SHOOT_1,
-        GATE_INTAKE,
-        SHOOT_2,
-        INTAKE_2,
-        SHOOT_3,
-        LEAVE,
-        IDLE
+        PRELOAD_POS, PRELOAD_SHOOT,
+        INTAKE_1_POS, INTAKE_1, SHOOT_1_POS, SHOOT_1,
+        GATE_SHOOT_POS, GATE_SHOOT, GATE_INTAKE,
+        SHOOT_2_POS, SHOOT_2,
+        INTAKE_2_POS, INTAKE_2, SHOOT_3_POS, SHOOT_3,
+        LEAVE, IDLE
     }
-
-    private AutoState currentState = AutoState.PRELOAD_SHOOT;
+    private AutoState currentState = AutoState.PRELOAD_POS;
 
     @Override
     public void init() {
         panelsTelemetry = PanelsTelemetry.INSTANCE.getTelemetry();
-
-        // 1. Initialize Follower
         follower = Constants.createFollower(hardwareMap);
         follower.setStartingPose(new Pose(15.779, 109.959, Math.toRadians(90)));
-
-        // 2. Initialize Paths
         paths = new Paths(follower);
 
-        // 3. Initialize Intake Hardware
         intakeMotor = hardwareMap.get(DcMotor.class, "intake_motor");
         transferMotor = hardwareMap.get(DcMotor.class, "transfer_motor");
         intakeSensor = hardwareMap.get(DistanceSensor.class, "intake_distance");
@@ -88,61 +80,57 @@ public class ball12blueClose extends OpMode {
         intakeMotor.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
         transferMotor.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
 
-        // 4. Initialize Shooter Subsystem (isRed = false for Blue)
         shooter = new ShooterSubsystem(hardwareMap, false);
         lights = new LightingSubsystem(hardwareMap);
-
-        panelsTelemetry.debug("Status", "Initialized - Blue 12 Ball");
-        panelsTelemetry.update(telemetry);
     }
 
     @Override
     public void start() {
         shooter.enable();
-        shooter.setCloseMode(); // Use close mode presets + your ML adjustments
-        shootTimer.reset();
-        lights.setShooterLight(LightingSubsystem.LightMode.BLUE); // Set Team Color
+        shooter.setCloseMode();
+        follower.followPath(paths.shoot0);
     }
 
     @Override
     public void loop() {
         follower.update();
-        shooter.update(); // Keep PID active
+        shooter.update();
         updateJamDetection();
         autonomousPathUpdate();
         lights.update();
         updateLightsLogic();
-        // Telemetry
+
         panelsTelemetry.debug("State", currentState.name());
-        panelsTelemetry.debug("Shooter RPM", shooter.getCurrentRPM());
-        panelsTelemetry.debug("Jammed", jammed);
-        panelsTelemetry.debug("Pose", follower.getPose().toString());
+        panelsTelemetry.debug("Progress", follower.getCurrentTValue());
+        panelsTelemetry.debug("Is Busy", follower.isBusy());
         panelsTelemetry.update(telemetry);
     }
 
-    private void updateLightsLogic() {
-        // Handle Jam Light
-        if (jammed) {
-            lights.setJamLight(LightingSubsystem.LightMode.RED_BLINK);
-        } else {
-            lights.setJamLight(LightingSubsystem.LightMode.GREEN);
-        }
-
-        // Handle Shooter Light (Blink when at target RPM)
-        if (shooter.isEnabled() && shooter.isAtTarget()) {
-            lights.setShooterLight(LightingSubsystem.LightMode.PINK_BLINK); // "Ready to Fire"
-        } else {
-            lights.setShooterLight(LightingSubsystem.LightMode.BLUE); // "Charging/Normal"
-        }
-    }
-
     public void autonomousPathUpdate() {
+        double t = follower.getCurrentTValue();
+
         switch (currentState) {
+            case PRELOAD_POS:
+                stopIntake();
+                if (!follower.isBusy()) {
+                    currentState = AutoState.PRELOAD_SHOOT;
+                    shootTimer.reset();
+                }
+                break;
+
             case PRELOAD_SHOOT:
                 runShootMode();
                 if (shootTimer.seconds() > SHOOT_DURATION) {
-                    stopIntake();
-                    follower.followPath(paths.shoot0);
+                    follower.followPath(paths.intake1Pos);
+                    currentState = AutoState.INTAKE_1_POS;
+                }
+                break;
+
+            case INTAKE_1_POS:
+                runIntakeMode();
+                if (t > 0.5) shooter.setCloseMode();
+                if (!follower.isBusy()) {
+                    follower.followPath(paths.intake1, true);
                     currentState = AutoState.INTAKE_1;
                 }
                 break;
@@ -150,73 +138,103 @@ public class ball12blueClose extends OpMode {
             case INTAKE_1:
                 runIntakeMode();
                 if (!follower.isBusy()) {
-                    follower.followPath(paths.intake1);
+                    follower.followPath(paths.shoot1);
+                    currentState = AutoState.SHOOT_1_POS;
+                }
+                break;
+
+            case SHOOT_1_POS:
+                runIntakeMode();
+                if (!follower.isBusy()) {
                     currentState = AutoState.SHOOT_1;
+                    shootTimer.reset();
                 }
                 break;
 
             case SHOOT_1:
-                stopIntake();
+                runShootMode();
+                if (shootTimer.seconds() > SHOOT_DURATION) {
+                    follower.followPath(paths.gateShootPos);
+                    currentState = AutoState.GATE_SHOOT_POS;
+                }
+                break;
+
+            case GATE_SHOOT_POS:
+                runIntakeMode();
                 if (!follower.isBusy()) {
-                    follower.followPath(paths.shoot1);
+                    currentState = AutoState.GATE_SHOOT;
                     shootTimer.reset();
+                }
+                break;
+
+            case GATE_SHOOT:
+                runShootMode();
+                if (shootTimer.seconds() > SHOOT_DURATION) {
+                    follower.followPath(paths.gateintake);
                     currentState = AutoState.GATE_INTAKE;
                 }
                 break;
 
             case GATE_INTAKE:
-                if (shootTimer.seconds() < SHOOT_DURATION) {
-                    runShootMode();
-                } else {
-                    // Drive to gate - Full power intake (ignoring jam sensor here)
-                    intakeMotor.setPower(-1.0);
-                    transferMotor.setPower(-0.15);
-                    if (!follower.isBusy()) {
-                        follower.followPath(paths.gateintake);
-                        currentState = AutoState.SHOOT_2;
-                    }
+                runIntakeMode();
+                if (!follower.isBusy()) {
+                    follower.followPath(paths.shoot2);
+                    currentState = AutoState.SHOOT_2_POS;
+                }
+                break;
+
+            case SHOOT_2_POS:
+                runIntakeMode();
+                if (!follower.isBusy()) {
+                    currentState = AutoState.SHOOT_2;
+                    shootTimer.reset();
                 }
                 break;
 
             case SHOOT_2:
+                runShootMode();
+                if (shootTimer.seconds() > SHOOT_DURATION) {
+                    follower.followPath(paths.intake2Pos);
+                    currentState = AutoState.INTAKE_2_POS;
+                }
+                break;
+
+            case INTAKE_2_POS:
+                runIntakeMode();
                 if (!follower.isBusy()) {
-                    stopIntake();
-                    follower.followPath(paths.shoot2);
-                    shootTimer.reset();
+                    follower.followPath(paths.intake2, true);
                     currentState = AutoState.INTAKE_2;
                 }
                 break;
 
             case INTAKE_2:
-                if (shootTimer.seconds() < SHOOT_DURATION) {
-                    runShootMode();
-                } else {
-                    runIntakeMode();
-                    if (!follower.isBusy()) {
-                        follower.followPath(paths.intake);
-                        currentState = AutoState.SHOOT_3;
-                    }
+                runIntakeMode();
+                if (!follower.isBusy()) {
+                    follower.followPath(paths.shoot3);
+                    currentState = AutoState.SHOOT_3_POS;
+                }
+                break;
+
+            case SHOOT_3_POS:
+                runIntakeMode();
+                if (!follower.isBusy()) {
+                    currentState = AutoState.SHOOT_3;
+                    shootTimer.reset();
                 }
                 break;
 
             case SHOOT_3:
-                stopIntake();
-                if (!follower.isBusy()) {
-                    follower.followPath(paths.shoot3);
-                    shootTimer.reset();
+                runShootMode();
+                if (shootTimer.seconds() > SHOOT_DURATION) {
+                    follower.followPath(paths.leave);
                     currentState = AutoState.LEAVE;
                 }
                 break;
 
             case LEAVE:
-                if (shootTimer.seconds() < SHOOT_DURATION) {
-                    runShootMode();
-                } else {
-                    shooter.disable();
-                    if (!follower.isBusy()) {
-                        follower.followPath(paths.leave);
-                        currentState = AutoState.IDLE;
-                    }
+                stopIntake();
+                if (!follower.isBusy()) {
+                    currentState = AutoState.IDLE;
                 }
                 break;
 
@@ -225,23 +243,20 @@ public class ball12blueClose extends OpMode {
                 shooter.disable();
                 break;
         }
-        pathState = currentState.ordinal();
     }
-
-    /* ================= HELPERS ================= */
 
     private void runIntakeMode() {
         if (!jammed) {
-            intakeMotor.setPower(-1.0);
-            transferMotor.setPower(-0.15);
+            intakeMotor.setPower(INTAKE_POWER);
+            transferMotor.setPower(INTAKE_TRANSFER_POWER);
         } else {
             stopIntake();
         }
     }
 
     private void runShootMode() {
-        intakeMotor.setPower(-0.55);
-        transferMotor.setPower(0.9);
+        intakeMotor.setPower(SHOOT_INTAKE_POWER);
+        transferMotor.setPower(SHOOT_TRANSFER_POWER);
     }
 
     private void stopIntake() {
@@ -264,48 +279,87 @@ public class ball12blueClose extends OpMode {
         }
     }
 
-    @Override
-    public void stop() {
-        autoEndPose = follower.getPose(); // Pass pose to TeleOp
-        shooter.stop(); // Save any adjustments
+    private void updateLightsLogic() {
+        if (jammed) {
+            lights.setJamLight(LightingSubsystem.LightMode.RED_BLINK);
+        } else {
+            lights.setJamLight(LightingSubsystem.LightMode.GREEN);
+        }
+
+        if (shooter.isEnabled() && shooter.isAtTarget()) {
+            lights.setShooterLight(LightingSubsystem.LightMode.PINK_BLINK);
+        } else {
+            lights.setShooterLight(LightingSubsystem.LightMode.BLUE);
+        }
     }
 
-    /* ================= PATHS ================= */
+    @Override
+    public void stop() {
+        autoEndPose = follower.getPose();
+        shooter.stop();
+    }
+
     public static class Paths {
-        public PathChain shoot0, intake1, shoot1, gateintake, shoot2, intake, shoot3, leave;
+        public PathChain shoot0, intake1Pos, intake1, shoot1, gateShootPos, gateintake, shoot2, intake2Pos, intake2, shoot3, leave;
 
         public Paths(Follower follower) {
-            shoot0 = follower.pathBuilder().addPath(
-                    new BezierLine(new Pose(15.779, 109.959), new Pose(57.655, 78.207))
-            ).setLinearHeadingInterpolation(Math.toRadians(90), Math.toRadians(129)).setReversed().build();
+            shoot0 = follower.pathBuilder()
+                    .addPath(new BezierLine(new Pose(15.779, 109.959), new Pose(57.655, 78.207)))
+                    .setLinearHeadingInterpolation(Math.toRadians(90), Math.toRadians(129))
+                    .build();
 
-            intake1 = follower.pathBuilder().addPath(
-                    new BezierCurve(new Pose(57.655, 78.207), new Pose(56.858, 59.569), new Pose(22.441, 59.469))
-            ).setTangentHeadingInterpolation().setReversed().build();
+            intake1Pos = follower.pathBuilder()
+                    .addPath(new BezierCurve(new Pose(57.655, 78.207), new Pose(56.858, 59.569), new Pose(22.441, 59.469)))
+                    .setTangentHeadingInterpolation()
+                    .setReversed()
+                    .build();
 
-            shoot1 = follower.pathBuilder().addPath(
-                    new BezierLine(new Pose(22.441, 59.469), new Pose(58.497, 77.745))
-            ).setLinearHeadingInterpolation(Math.toRadians(0), Math.toRadians(129)).build();
+            intake1 = follower.pathBuilder()
+                    .addPath(new BezierLine(new Pose(22.441, 59.469), new Pose(22.441, 59.469)))
+                    .setConstantHeadingInterpolation(Math.toRadians(0))
+                    .build();
 
-            gateintake = follower.pathBuilder().addPath(
-                    new BezierLine(new Pose(58.497, 77.745), new Pose(11.103, 59.469))
-            ).setLinearHeadingInterpolation(Math.toRadians(129), Math.toRadians(327)).build();
+            shoot1 = follower.pathBuilder()
+                    .addPath(new BezierLine(new Pose(22.441, 59.469), new Pose(58.497, 77.745)))
+                    .setLinearHeadingInterpolation(Math.toRadians(0), Math.toRadians(129))
+                    .build();
 
-            shoot2 = follower.pathBuilder().addPath(
-                    new BezierCurve(new Pose(11.103, 59.469), new Pose(73.931, 57.838), new Pose(58.262, 77.876))
-            ).setTangentHeadingInterpolation().build();
+            gateShootPos = follower.pathBuilder()
+                    .addPath(new BezierLine(new Pose(58.497, 77.745), new Pose(58.497, 77.745)))
+                    .setConstantHeadingInterpolation(Math.toRadians(129))
+                    .build();
 
-            intake = follower.pathBuilder().addPath(
-                    new BezierCurve(new Pose(58.262, 77.876), new Pose(38.024, 82.462), new Pose(20.379, 83.738))
-            ).setTangentHeadingInterpolation().build();
+            gateintake = follower.pathBuilder()
+                    .addPath(new BezierLine(new Pose(58.497, 77.745), new Pose(11.103, 59.469)))
+                    .setLinearHeadingInterpolation(Math.toRadians(129), Math.toRadians(327))
+                    .setReversed()
+                    .build();
 
-            shoot3 = follower.pathBuilder().addPath(
-                    new BezierCurve(new Pose(20.379, 83.738), new Pose(40.410, 99.810), new Pose(58.124, 77.869))
-            ).setLinearHeadingInterpolation(Math.toRadians(176), Math.toRadians(129)).setReversed().build();
+            shoot2 = follower.pathBuilder()
+                    .addPath(new BezierCurve(new Pose(11.103, 59.469), new Pose(73.931, 57.838), new Pose(58.262, 77.876)))
+                    .setTangentHeadingInterpolation()
+                    .build();
 
-            leave = follower.pathBuilder().addPath(
-                    new BezierLine(new Pose(58.124, 77.869), new Pose(50.814, 72.738))
-            ).setConstantHeadingInterpolation(Math.toRadians(129)).build();
+            intake2Pos = follower.pathBuilder()
+                    .addPath(new BezierCurve(new Pose(58.262, 77.876), new Pose(38.024, 82.462), new Pose(20.379, 83.738)))
+                    .setTangentHeadingInterpolation()
+                    .setReversed()
+                    .build();
+
+            intake2 = follower.pathBuilder()
+                    .addPath(new BezierLine(new Pose(20.379, 83.738), new Pose(20.379, 83.738)))
+                    .setConstantHeadingInterpolation(Math.toRadians(176))
+                    .build();
+
+            shoot3 = follower.pathBuilder()
+                    .addPath(new BezierCurve(new Pose(20.379, 83.738), new Pose(40.410, 99.810), new Pose(58.124, 77.869)))
+                    .setLinearHeadingInterpolation(Math.toRadians(176), Math.toRadians(129))
+                    .build();
+
+            leave = follower.pathBuilder()
+                    .addPath(new BezierLine(new Pose(58.124, 77.869), new Pose(50.814, 72.738)))
+                    .setConstantHeadingInterpolation(Math.toRadians(129))
+                    .build();
         }
     }
 }
