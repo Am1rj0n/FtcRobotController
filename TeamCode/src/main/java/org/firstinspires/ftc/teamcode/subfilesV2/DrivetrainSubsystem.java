@@ -34,14 +34,14 @@ public class DrivetrainSubsystem {
     private final Pose GOAL_POSE;
 
     // Corner Reset Positions
-    private static final Pose RED_CORNER = new Pose(9, 8, Math.toRadians(0));
+    private static final Pose RED_CORNER = new Pose(10, 9, Math.toRadians(0));
     private static final Pose BLUE_CORNER = new Pose(135, 8, Math.toRadians(180));
 
     public DrivetrainSubsystem(HardwareMap hardwareMap, Follower follower, boolean isRed) {
         this.follower = follower;
         this.isRed = isRed;
         // Blue goal at top-left (14, 144), Red goal at top-right (130, 144)
-        GOAL_POSE = isRed ? new Pose(144, 144, 0) : new Pose(0, 144, 0);
+        GOAL_POSE = isRed ? new Pose(131, 137, 0) : new Pose(13, 136, 0);
     }
 
     public void drive(double forward, double strafe, double turn) {
