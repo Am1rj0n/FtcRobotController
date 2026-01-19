@@ -13,9 +13,10 @@ public class AutoPositionSubsystem {
 
     private boolean isActive = false;
 
+    // Park position kept same as before
     private static final Pose BLUE_PARK = new Pose(105.103, 32.938, Math.toRadians(90));
     private static final Pose BLUE_CLOSE_SHOOT = new Pose(57.766, 86.731, Math.toRadians(134));
-    private static final Pose BLUE_FAR_SHOOT = new Pose (58.579, 13.828, Math.toRadians(113.5)); // Same as close for now
+    private static final Pose BLUE_FAR_SHOOT = new Pose(58.579, 13.828, Math.toRadians(113.5)); // Matches auto shootpos
 
     // Red alliance positions (mirrored)
     private static final Pose RED_PARK = BLUE_PARK.mirror();

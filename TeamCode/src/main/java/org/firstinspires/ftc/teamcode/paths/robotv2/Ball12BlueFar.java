@@ -37,6 +37,8 @@ public class Ball12BlueFar extends OpMode {
     private ElapsedTime shootTimer = new ElapsedTime();
     private ElapsedTime jamTimer = new ElapsedTime();
 
+    public static Pose autoEndPose = null;
+
     // --- SHOOTER DIRECT POWER SETTINGS ---
     private static final double TOP_MOTOR_POWER = 0.66;
     private static final double BOTTOM_MOTOR_POWER = 0.67;
@@ -49,7 +51,7 @@ public class Ball12BlueFar extends OpMode {
 
     // --- TUNING CONSTANTS ---
     private static final double SPIN_UP_DURATION = 1.0;
-    private static final double SHOOT_DURATION = 2.5;
+    private static final double SHOOT_DURATION = 3.0; //was 2.5
     private static final double JAM_DISTANCE_CM = 14.0;
     private static final double JAM_TIME = 0.7;
 
@@ -305,6 +307,8 @@ public class Ball12BlueFar extends OpMode {
         shooterBottom.setPower(0);
         intakeMotor.setPower(0);
         transferMotor.setPower(0);
+
+        autoEndPose = follower.getPose();
     }
 
     public static class Paths {
@@ -320,7 +324,7 @@ public class Ball12BlueFar extends OpMode {
             ).setLinearHeadingInterpolation(Math.toRadians(113.5), Math.toRadians(0)).build();
 
             intake1 = follower.pathBuilder().addPath(
-                    new BezierLine(new Pose(56.662, 33.166), new Pose(20, 33.441))
+                    new BezierLine(new Pose(56.662, 27.166), new Pose(20, 27.441))
             ).setTangentHeadingInterpolation().setReversed().build();
 
             Shootpos = follower.pathBuilder().addPath(
@@ -332,11 +336,11 @@ public class Ball12BlueFar extends OpMode {
             ).setLinearHeadingInterpolation(Math.toRadians(113.5), Math.toRadians(0)).build();
 
             intake2 = follower.pathBuilder().addPath(
-                    new BezierLine(new Pose(58.386, 50.931), new Pose(29.186, 50.952))
+                    new BezierLine(new Pose(58.386, 50.931), new Pose(30.186, 50.952))
             ).setTangentHeadingInterpolation().setReversed().build();
 
             shootpos2 = follower.pathBuilder().addPath(
-                    new BezierLine(new Pose(29.186, 59.952), new Pose(58.607, 13.290))
+                    new BezierLine(new Pose(30.186, 59.952), new Pose(58.607, 13.290))
             ).setLinearHeadingInterpolation(Math.toRadians(0), Math.toRadians(113.5)).build();
 
             intakepos3 = follower.pathBuilder().addPath(
@@ -349,7 +353,7 @@ public class Ball12BlueFar extends OpMode {
 
             shootpos3 = follower.pathBuilder().addPath(
                     new BezierLine(new Pose(26, 80.145), new Pose(58.841, 13.221))
-            ).setLinearHeadingInterpolation(Math.toRadians(0), Math.toRadians(114.5)).build();
+            ).setLinearHeadingInterpolation(Math.toRadians(0), Math.toRadians(113.5)).build();
 
             Leave = follower.pathBuilder().addPath(
                     new BezierLine(new Pose(58.841, 13.221), new Pose(50.393, 22.331))

@@ -37,6 +37,8 @@ public class Ball12RedFar extends OpMode {
     private ElapsedTime shootTimer = new ElapsedTime();
     private ElapsedTime jamTimer = new ElapsedTime();
 
+    public static Pose autoEndPose = null;
+
     // --- SHOOTER DIRECT POWER SETTINGS ---
     private static final double TOP_MOTOR_POWER = 0.66;
     private static final double BOTTOM_MOTOR_POWER = 0.67;
@@ -49,7 +51,7 @@ public class Ball12RedFar extends OpMode {
 
     // --- TUNING CONSTANTS ---
     private static final double SPIN_UP_DURATION = 1.0;
-    private static final double SHOOT_DURATION = 2.5;
+    private static final double SHOOT_DURATION = 3.0; //was 2.5
     private static final double JAM_DISTANCE_CM = 14.0;
     private static final double JAM_TIME = 0.7;
 
@@ -306,6 +308,8 @@ public class Ball12RedFar extends OpMode {
         shooterBottom.setPower(0);
         intakeMotor.setPower(0);
         transferMotor.setPower(0);
+
+        autoEndPose = follower.getPose();
     }
 
     public static class Paths {
@@ -314,10 +318,10 @@ public class Ball12RedFar extends OpMode {
         public Paths(Follower follower) {
             Pose blueStart = new Pose(56, 8);
             Pose blueShoot = new Pose(58.579, 13.828);
-            Pose blueIntake1Pre = new Pose(54.662, 30.166);
-            Pose blueIntake1PreAdjust = new Pose(54.662, 30.166);
-            Pose blueIntake1 = new Pose(22, 30.441);
-            Pose blueIntake1Adjust = new Pose(22, 30.441);
+            Pose blueIntake1Pre = new Pose(54.662, 27.166);
+            Pose blueIntake1PreAdjust = new Pose(54.662, 27.166);
+            Pose blueIntake1 = new Pose(22, 27.441);
+            Pose blueIntake1Adjust = new Pose(22, 27.441);
             Pose blueIntake2Pre = new Pose(58.386, 50.931);
             Pose blueIntake2 = new Pose(16.5, 50.952);
             Pose blueIntake2Adjust = new Pose(28, 56.952);

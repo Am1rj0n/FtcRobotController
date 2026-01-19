@@ -5,11 +5,6 @@ import com.qualcomm.robotcore.hardware.DcMotorEx;
 import com.qualcomm.robotcore.hardware.DcMotorSimple;
 import com.qualcomm.robotcore.hardware.HardwareMap;
 
-import java.io.File;
-import java.io.FileWriter;
-import java.io.BufferedReader;
-import java.io.FileReader;
-import java.io.IOException;
 import java.util.HashMap;
 
 public class shootersubv2 {
@@ -21,15 +16,14 @@ public class shootersubv2 {
     private boolean manualMode = false;
     private boolean isCloseMode = true;
 
-    // Machine learning map for power adjustments
+    // Machine learning map for power adjustments (NOT SAVED between matches)
     private final HashMap<String, Double> powerAdjustments = new HashMap<>();
-    private final File saveFile;
 
-    // FAR MODE: Top=0.67, Bottom=0.70
-    private static final double FAR_TOP_POWER = 0.67;
-    private static final double FAR_BOTTOM_POWER = 0.70;
+    // FAR MODE: Top=0.66, Bottom=0.67
+    private static final double FAR_TOP_POWER = 0.66;
+    private static final double FAR_BOTTOM_POWER = 0.67;
 
-    // CLOSE MODE: Top=0.85, Bottom=0.70
+    // CLOSE MODE: Top=0.6, Bottom=0.6
     private static final double CLOSE_TOP_POWER = 0.6;
     private static final double CLOSE_BOTTOM_POWER = 0.6;
 
@@ -51,10 +45,7 @@ public class shootersubv2 {
         bottomMotor.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
         topMotor.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
 
-        // Load saved adjustments
-        String filename = isRed ? "shooter_red.txt" : "shooter_blue.txt";
-        saveFile = new File("/sdcard/FIRST/" + filename);
-        loadAdjustments();
+        // NO LOADING - start fresh each match
     }
 
     // Method to get motor references for direct control from TeleOp
@@ -104,7 +95,7 @@ public class shootersubv2 {
         manualBothPower = Math.max(manualBothPower - 0.05, 0.0);
     }
 
-    // ==================== ML MODE: ADJUST BOTH BY ±1% ====================
+    // ==================== ML MODE: ADJUST BOTH BY ±1% (NOT SAVED) ====================
     public void increaseBothPower() {
         String topKey = (isCloseMode ? "close" : "far") + "_top";
         String bottomKey = (isCloseMode ? "close" : "far") + "_bottom";
@@ -114,7 +105,7 @@ public class shootersubv2 {
 
         powerAdjustments.put(topKey, Math.min(currentTop + 0.01, 0.3));
         powerAdjustments.put(bottomKey, Math.min(currentBottom + 0.01, 0.3));
-        saveAdjustments();
+        // NO SAVING
     }
 
     public void decreaseBothPower() {
@@ -126,7 +117,7 @@ public class shootersubv2 {
 
         powerAdjustments.put(topKey, Math.max(currentTop - 0.01, -0.3));
         powerAdjustments.put(bottomKey, Math.max(currentBottom - 0.01, -0.3));
-        saveAdjustments();
+        // NO SAVING
     }
 
     // ==================== MODE CONTROL ====================
@@ -185,33 +176,6 @@ public class shootersubv2 {
         enabled = false;
         bottomMotor.setPower(0);
         topMotor.setPower(0);
-        saveAdjustments();
-    }
-
-    // ==================== FILE I/O ====================
-    private void saveAdjustments() {
-        try (FileWriter writer = new FileWriter(saveFile, false)) {
-            for (String key : powerAdjustments.keySet()) {
-                writer.write(key + "," + powerAdjustments.get(key) + "\n");
-            }
-        } catch (IOException e) {
-            // Silent fail
-        }
-    }
-
-    private void loadAdjustments() {
-        if (!saveFile.exists()) return;
-
-        try (BufferedReader reader = new BufferedReader(new FileReader(saveFile))) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                String[] parts = line.split(",");
-                if (parts.length == 2) {
-                    powerAdjustments.put(parts[0], Double.parseDouble(parts[1]));
-                }
-            }
-        } catch (IOException e) {
-            // Silent fail
-        }
+        // NO SAVING
     }
 }

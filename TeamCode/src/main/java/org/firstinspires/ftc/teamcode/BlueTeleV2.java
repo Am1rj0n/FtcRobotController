@@ -4,7 +4,6 @@ import com.qualcomm.robotcore.eventloop.opmode.OpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 import com.qualcomm.robotcore.util.ElapsedTime;
 
-import org.firstinspires.ftc.teamcode.paths.robotv2.ball12blueClose;
 import org.firstinspires.ftc.teamcode.subfilesV2.*;
 import org.firstinspires.ftc.teamcode.pedroPathing.Constants;
 import com.pedropathing.follower.Follower;
@@ -29,7 +28,8 @@ public class BlueTeleV2 extends OpMode {
     private static final boolean IS_RED = false;
 
     // System states
-    private enum SystemMode { OFF, INTAKE, SPIT, SHOOT }
+    private enum SystemMode {OFF, INTAKE, SPIT, SHOOT}
+
     private SystemMode currentMode = SystemMode.OFF;
 
     // Debouncing
@@ -44,6 +44,7 @@ public class BlueTeleV2 extends OpMode {
     private boolean lastCircle = false;
     private boolean lastR3 = false;
     private boolean lastGP2Cross = false;
+    private boolean lastDpadUp = false;  // ← NEW: For vision assist toggle
 
     // Time-based debouncing for shooter adjustments
     private ElapsedTime gp2AdjustTimer = new ElapsedTime();
@@ -62,13 +63,15 @@ public class BlueTeleV2 extends OpMode {
         Pose startPose = getStartPoseFromAuto();
         follower.setStartingPose(startPose);
 
-        // Initialize all subsystems
-        drivetrain = new DrivetrainSubsystem(hardwareMap, follower, IS_RED);
+        // Initialize Limelight FIRST
+        limelight = new LimelightHelper(hardwareMap, IS_RED);
+
+        // Initialize all subsystems (drivetrain needs limelight now)
+        drivetrain = new DrivetrainSubsystem(hardwareMap, follower, IS_RED, limelight);  // ← ADDED limelight parameter
         intake = new IntakeSubsystem(hardwareMap);
         shooter = new shootersubv2(hardwareMap, IS_RED);
         lighting = new LightingSubsystem(hardwareMap);
         autoPosition = new AutoPositionSubsystem(follower, IS_RED);
-        limelight = new LimelightHelper(hardwareMap, IS_RED);
         artifactFetcher = new ArtifactFetcher(hardwareMap, follower);
 
         telemetry.addLine("✓ Ultimate TeleOp BLUE Initialized");
@@ -99,7 +102,7 @@ public class BlueTeleV2 extends OpMode {
         }
 
         handleShooterControls();
-        updateShooterMotors();  // NEW: Direct motor control
+        updateShooterMotors();
         applySystemMode();
 
         updateLighting();
@@ -124,7 +127,7 @@ public class BlueTeleV2 extends OpMode {
         if (gamepad1.touchpad && !lastTouchpad) {
             drivetrain.toggleHold();
             if (drivetrain.isHolding()) {
-                gamepad1.rumble(500); // Vibrate when hold is active
+                gamepad1.rumble(500);
             }
         }
         lastTouchpad = gamepad1.touchpad;
@@ -132,7 +135,7 @@ public class BlueTeleV2 extends OpMode {
         // --- SHARE: CORNER RESET ---
         if (gamepad1.share) {
             drivetrain.resetToCorner();
-            gamepad1.rumbleBlips(2); // Double vibration
+            gamepad1.rumbleBlips(2);
         }
 
         // Speed control with bumpers (L1/R1)
@@ -153,6 +156,18 @@ public class BlueTeleV2 extends OpMode {
             drivetrain.toggleGoalTracking();
         }
         lastGP1R2 = gp1R2;
+
+        // --- DPAD UP: VISION ASSIST TOGGLE (NEW) ---
+        boolean dpadUp = gamepad1.dpad_up;
+        if (dpadUp && !lastDpadUp) {
+            boolean nowEnabled = drivetrain.toggleVisionAssist();
+            if (nowEnabled) {
+                gamepad1.rumble(500);  // Single long vibration when ON
+            } else {
+                gamepad1.rumbleBlips(2);  // Double vibration when OFF
+            }
+        }
+        lastDpadUp = dpadUp;
 
         drivetrain.drive(forward, strafe, turn);
     }
@@ -185,7 +200,6 @@ public class BlueTeleV2 extends OpMode {
         lastCircle = circle;
 
         // GAMEPAD 2: X button as JAM OVERRIDE + INTAKE MODE
-        // This forces intake AND transfer to run (same as normal intake mode)
         boolean gp2Cross = gamepad2.cross;
         if (gp2Cross && !lastGP2Cross) {
             currentMode = SystemMode.INTAKE;
@@ -195,7 +209,6 @@ public class BlueTeleV2 extends OpMode {
 
     // ==================== AUTO POSITIONING ====================
     private void handleAutoPositioning() {
-        // D-Pad controls (same as before)
         if (gamepad1.dpad_down) {
             autoPosition.goToFarShoot();
         }
@@ -220,20 +233,17 @@ public class BlueTeleV2 extends OpMode {
     private void handleArtifactFetcher() {
         boolean leftTrigger = gamepad1.left_trigger > 0.5;
 
-        // Toggle the active state (L2 hold)
         if (leftTrigger && !lastLeftTrigger) {
             artifactFetcher.toggle();
         }
         lastLeftTrigger = leftTrigger;
 
         if (artifactFetcher.isActive()) {
-            // BREAK logic: If the driver moves the sticks significantly, turn off the fetcher
             if (Math.abs(gamepad1.left_stick_y) > 0.2 || Math.abs(gamepad1.left_stick_x) > 0.2) {
                 artifactFetcher.toggle();
             } else {
                 artifactFetcher.update();
 
-                // Auto-enable intake
                 if (currentMode == SystemMode.OFF && !intake.isJammed()) {
                     currentMode = SystemMode.INTAKE;
                 }
@@ -262,7 +272,7 @@ public class BlueTeleV2 extends OpMode {
         shooter.setManualMode(manualMode);
 
         if (manualMode) {
-            // L2 HELD: D-Pad adjusts BOTH top and bottom by ±5% (manual mode)
+            // L2 HELD: D-Pad adjusts BOTH top and bottom by ±5%
             if (gp2AdjustTimer.seconds() > ADJUST_DELAY) {
                 if (gamepad2.dpad_up) {
                     shooter.increaseManualBothPower();
@@ -274,7 +284,7 @@ public class BlueTeleV2 extends OpMode {
                 }
             }
         } else {
-            // L2 NOT HELD: Bumpers adjust BOTH top and bottom by ±1% (ML mode)
+            // L2 NOT HELD: Bumpers adjust BOTH by ±1%
             if (gp2AdjustTimer.seconds() > ADJUST_DELAY) {
                 if (gamepad2.left_bumper) {
                     shooter.decreaseBothPower();
@@ -288,7 +298,7 @@ public class BlueTeleV2 extends OpMode {
         }
     }
 
-    // ==================== SHOOTER MOTOR CONTROL (DIRECT) ====================
+    // ==================== SHOOTER MOTOR CONTROL ====================
     private void updateShooterMotors() {
         if (!shooter.isEnabled()) {
             shooter.getTopMotor().setPower(0);
@@ -298,19 +308,15 @@ public class BlueTeleV2 extends OpMode {
             return;
         }
 
-        // Get target powers from subsystem (includes adjustments)
         double targetTopPower = shooter.getTargetTopPower();
         double targetBottomPower = shooter.getTargetBottomPower();
 
-        // Clamp powers
         targetTopPower = Math.max(0, Math.min(1.0, targetTopPower));
         targetBottomPower = Math.max(0, Math.min(1.0, targetBottomPower));
 
-        // Set motor powers directly
         shooter.getTopMotor().setPower(targetTopPower);
         shooter.getBottomMotor().setPower(targetBottomPower);
 
-        // Store for telemetry
         currentTopPower = targetTopPower;
         currentBottomPower = targetBottomPower;
     }
@@ -319,10 +325,7 @@ public class BlueTeleV2 extends OpMode {
     private void applySystemMode() {
         switch (currentMode) {
             case INTAKE:
-                // GP2 Cross (JAM OVERRIDE): Always run intake even if jammed
-                // GP1 Cross (NORMAL): Stop if jammed
                 if (gamepad2.cross) {
-                    // Force intake to run (jam override)
                     intake.runIntake();
                 } else if (intake.isJammed()) {
                     intake.stop();
@@ -348,17 +351,14 @@ public class BlueTeleV2 extends OpMode {
 
     // ==================== LIGHTING ====================
     private void updateLighting() {
-        // SHOOTER LIGHT: Blink when in align mode
         if (shooter.isEnabled()) {
             if (drivetrain.isGoalTrackingEnabled()) {
-                // Blink the respective color when align mode is active
                 if (shooter.isCloseMode()) {
                     lighting.setShooterLight(LightingSubsystem.LightMode.PINK_BLINK);
                 } else {
                     lighting.setShooterLight(LightingSubsystem.LightMode.BLUE_BLINK);
                 }
             } else {
-                // Solid color when not in align mode
                 if (shooter.isCloseMode()) {
                     lighting.setShooterLight(LightingSubsystem.LightMode.PINK);
                 } else {
@@ -369,7 +369,6 @@ public class BlueTeleV2 extends OpMode {
             lighting.setShooterLight(LightingSubsystem.LightMode.RED);
         }
 
-        // JAM LIGHT: Only for jam status
         lighting.setJamLight(intake.isJammed() ?
                 LightingSubsystem.LightMode.RED :
                 LightingSubsystem.LightMode.GREEN);
@@ -408,6 +407,8 @@ public class BlueTeleV2 extends OpMode {
         }
 
         telemetry.addLine("╠═══ LIMELIGHT ═══╣");
+        telemetry.addData("│ Vision Assist", drivetrain.isVisionAssistEnabled() ? "ON ✓" : "OFF");
+        telemetry.addData("│ Using", drivetrain.isUsingVision() ? "VISION ✓" : "Odometry");
         telemetry.addData("│ Distance", "%.1f in", limelight.getDistanceFromShoot());
         telemetry.addData("│ Angle", "%.1f°", limelight.getAngleFromShoot());
         telemetry.addData("│ Last Update", "%.1fs ago", runtime.seconds() - limelight.getLastUpdateTime());
@@ -420,16 +421,15 @@ public class BlueTeleV2 extends OpMode {
         telemetry.update();
     }
 
-    // ==================== HELPER METHODS ====================
     private Pose getStartPoseFromAuto() {
         try {
-            Pose bluePose = ball12blueClose.autoEndPose;
+            Pose bluePose = org.firstinspires.ftc.teamcode.paths.robotv2.Ball12BlueFar.autoEndPose;
             if (bluePose != null && (bluePose.getX() != 0 || bluePose.getY() != 0)) {
                 return bluePose;
             }
         } catch (Exception e) {
             // No auto end pose found
         }
-        return new Pose(48.9, 66.6, Math.toRadians(0));
+        return new Pose(50.393, 22.331, Math.toRadians(113.5));
     }
 }
