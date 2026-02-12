@@ -51,7 +51,7 @@ public class TestOut extends LinearOpMode {
         outtakeMotor2 = hardwareMap.get(DcMotorEx.class, "outtakeMotor2");
 
         // Motor direction
-        outtakeMotor1.setDirection(DcMotorSimple.Direction.FORWARD);
+        outtakeMotor1.setDirection(DcMotorSimple.Direction.REVERSE);
         outtakeMotor2.setDirection(DcMotorSimple.Direction.FORWARD);
 
         // Encoder setup

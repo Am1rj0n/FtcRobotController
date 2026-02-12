@@ -16,25 +16,6 @@ import com.qualcomm.robotcore.hardware.HardwareMap;
 
 public class Constants {
 
-
-    // ========== SHOOTER PIDF COEFFICIENTS ==========
-    // These control how the shooter maintains target velocity
-    // Tuned for velocity in degrees/second (not RPM!)
-    public static PIDFCoefficients shooterCoefficients = new PIDFCoefficients(
-            0.005,      // P: Proportional gain - increase if too slow, decrease if oscillates
-            0.0002,     // I: Integral gain - helps eliminate steady-state error
-            0.0001,     // D: Derivative gain - dampens oscillations
-            0.0         // F: Feedforward - leave at 0 for now
-    );
-
-    // ========== SHOOTER PRESET VELOCITIES ==========
-    // All velocities in degrees/second
-
-    //36000 = 6000RPM
-    public static final double closeShootPower = 16000;   // Close range shooting (CHange to 2000-3000 if not work)
-    public static final double farShootPower = 28000;     // Far range shooting
-    public static final double idleShootPower = 5000;     // Idle speed (0.2 power equivalent = ~360 RPM = 72 deg/s at 20% of 1800 RPM)
-
     public static FollowerConstants followerConstants = new FollowerConstants()
             .mass(10.9)
         .forwardZeroPowerAcceleration(-29.1309918467)

@@ -10,7 +10,7 @@ public class ServoTester extends LinearOpMode {
     private Servo testServo;
 
     private double pos = 0.5;   // raw position (0–1)
-    private final double STEP = 0.002;   // MUCH smaller step
+    private final double STEP = 0.2;   // MUCH smaller step
 
     private boolean reversed = false;
     private boolean lastAToggle = false;

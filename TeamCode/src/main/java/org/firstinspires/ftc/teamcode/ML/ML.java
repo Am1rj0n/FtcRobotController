@@ -3,7 +3,7 @@ package org.firstinspires.ftc.teamcode.ML;
 import com.qualcomm.robotcore.hardware.HardwareMap;
 import com.qualcomm.robotcore.util.ElapsedTime;
 import org.firstinspires.ftc.robotcore.external.hardware.camera.WebcamName;
-import org.firstinspires.ftc.teamcode.subfilesV2.LimelightHelper;
+import org.firstinspires.ftc.teamcode.subsystems.Limelight;
 import org.firstinspires.ftc.vision.VisionPortal;
 import org.firstinspires.ftc.vision.apriltag.AprilTagProcessor;
 
@@ -15,7 +15,7 @@ import java.util.Map;
 
 public class ML {
 
-    private LimelightHelper limelight;
+    private Limelight limelight;
 
     // Learning parameters
     private static final double LEARNING_RATE = 0.01; // 1% adjustment per feedback
@@ -69,7 +69,7 @@ public class ML {
     private int successfulShots = 0;
 
     public ML (HardwareMap hardwareMap, boolean isRed) {
-        this.limelight = new LimelightHelper(hardwareMap, isRed);
+        this.limelight = new Limelight(hardwareMap, isRed);
         initializeDefaultProfiles();
     }
 
