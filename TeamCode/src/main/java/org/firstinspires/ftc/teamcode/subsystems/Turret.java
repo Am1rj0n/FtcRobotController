@@ -4,8 +4,10 @@ import com.qualcomm.robotcore.hardware.HardwareMap;
 import com.qualcomm.robotcore.hardware.Servo;
 import com.pedropathing.geometry.Pose;
 
-import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
-
+/**
+ * Turret with Odometry and Limelight tracking
+ * Servo at 0.5 = turret aligned with robot heading
+ */
 public class Turret {
 
     private final Servo turretServo;
@@ -13,50 +15,49 @@ public class Turret {
     private final boolean isRed;
 
     public enum Mode {
-        LIMELIGHT,    // Pure vision (L2)
-        ODOMETRY,     // Odometry + vision assist (R2)
-        MANUAL        // Manual control
+        ODOMETRY,   // Track goal using odometry
+        LIMELIGHT,  // Track goal using vision
+        MANUAL      // Manual control
     }
 
-    private Mode currentMode = Mode.MANUAL;
+    private Mode currentMode = Mode.ODOMETRY;
     private double targetAngle = 0.0;
     private double manualAngle = 0.0;
 
-    // Turret limits: ±58° (116° total range)
-    private static final double MIN_ANGLE = -58.0;
-    private static final double MAX_ANGLE = 58.0;
-    private static final double ALIGNMENT_TOLERANCE = 2.0; // degrees
+    // Servo range: 0.5 ± range gives symmetric motion
+    private static final double SERVO_CENTER = 0.5;
+    private static final double MIN_ANGLE = -58.0;  // degrees
+    private static final double MAX_ANGLE = 58.0;   // degrees
 
-    // Vision correction gain (for odometry mode)
-    private static final double VISION_CORRECTION_GAIN = 0.5;
+    // How close to consider aligned
+    private static final double ALIGNMENT_TOLERANCE = 3.0; // degrees
 
-    // Goal positions (inches)
-    private static final double BLUE_GOAL_X = 72.0;
-    private static final double BLUE_GOAL_Y = 72.0;
-    private static final double RED_GOAL_X = 72.0;
-    private static final double RED_GOAL_Y = -72.0;
+    // Goal positions
+    private static final double BLUE_GOAL_X = 0.0;
+    private static final double BLUE_GOAL_Y = 144.0;
+    private static final double RED_GOAL_X = 144.0;
+    private static final double RED_GOAL_Y = 144.0;
 
     public Turret(HardwareMap hardwareMap, Limelight limelight, boolean isRed) {
         turretServo = hardwareMap.servo.get("turret");
         this.limelight = limelight;
         this.isRed = isRed;
 
-        // Initialize to center position
-        setServoAngle(0);
+        // Initialize at center (aligned with robot)
+        turretServo.setPosition(SERVO_CENTER);
     }
 
-    public void setMode(Mode mode) {
-        currentMode = mode;
-    }
-
+    /**
+     * Main update - call every loop
+     */
     public void update(Pose robotPose) {
         switch (currentMode) {
-            case LIMELIGHT:
-                updateLimelightMode();
+            case ODOMETRY:
+                targetAngle = calculateOdometryAngle(robotPose);
                 break;
 
-            case ODOMETRY:
-                updateOdometryMode(robotPose);
+            case LIMELIGHT:
+                targetAngle = calculateLimelightAngle();
                 break;
 
             case MANUAL:
@@ -68,77 +69,99 @@ public class Turret {
     }
 
     /**
-     * Pure Limelight alignment - uses tx directly
+     * Odometry mode: Calculate angle to goal from current robot pose
      */
-    private void updateLimelightMode() {
-        int targetTag = isRed ? 24 : 20;
-
-        if (limelight.isAlignmentTagVisible(targetTag)) {
-            double tx = limelight.getTx();
-            // tx is already the angle offset we need
-            targetAngle = clampAngle(tx);
-        }
-        // If tag lost, hold last position
-    }
-
-    /**
-     * Odometry-based with vision correction when tag visible
-     */
-    private void updateOdometryMode(Pose pose) {
-        // Calculate base angle to goal from odometry
-        double heading = pose.getHeading();
+    private double calculateOdometryAngle(Pose pose) {
         double goalX = isRed ? RED_GOAL_X : BLUE_GOAL_X;
         double goalY = isRed ? RED_GOAL_Y : BLUE_GOAL_Y;
 
         double dx = goalX - pose.getX();
         double dy = goalY - pose.getY();
 
-        // Transform to robot-local coordinates
-        double localDx = (dx * Math.cos(heading)) + (dy * Math.sin(heading));
-        double localDy = -(dx * Math.sin(heading)) + (dy * Math.cos(heading));
+        // Angle to goal in global frame
+        double globalAngleToGoal = Math.toDegrees(Math.atan2(dy, dx));
 
-        double baseAngle = Math.toDegrees(Math.atan2(localDy, localDx));
+        // Robot heading
+        double robotHeading = Math.toDegrees(pose.getHeading());
 
-        // Apply vision correction if tag visible
-        int targetTag = isRed ? 24 : 20;
-        if (limelight.isAlignmentTagVisible(targetTag)) {
-            double txOffset = limelight.getTx();
-            baseAngle += (txOffset * VISION_CORRECTION_GAIN);
+        // Turret angle is relative to robot
+        // When robot faces goal, turret should be at 0°
+        double turretAngle = globalAngleToGoal - robotHeading;
+
+        // Normalize to ±180
+        while (turretAngle > 180) turretAngle -= 360;
+        while (turretAngle < -180) turretAngle += 360;
+
+        return clampAngle(turretAngle);
+    }
+
+    /**
+     * Limelight mode: Use vision offset
+     */
+    private double calculateLimelightAngle() {
+        if (limelight.isAlignmentTagVisible()) {
+            // Limelight gives direct offset angle
+            return clampAngle(limelight.getTx());
         }
-
-        targetAngle = clampAngle(baseAngle);
+        // If no tag, hold current position
+        return targetAngle;
     }
 
-    public void setManualAngle(double angle) {
-        manualAngle = clampAngle(angle);
-    }
-
+    /**
+     * Convert angle to servo position
+     * 0.5 = center (0°), 0.0 = -58°, 1.0 = +58°
+     */
     private void setServoAngle(double angle) {
-        double servoPosition = interpolateAngle(angle);
+        angle = clampAngle(angle);
+        double servoPosition = SERVO_CENTER + (angle / (MAX_ANGLE - MIN_ANGLE));
         turretServo.setPosition(servoPosition);
     }
 
     /**
-     * Map angle [-58, 58] to servo position [0, 1]
+     * Clamp angle to physical limits
      */
-    private double interpolateAngle(double angle) {
-        angle = clampAngle(angle);
-        return (angle - MIN_ANGLE) / (MAX_ANGLE - MIN_ANGLE);
-    }
-
     private double clampAngle(double angle) {
         return Math.max(MIN_ANGLE, Math.min(MAX_ANGLE, angle));
     }
 
+    /**
+     * Check if turret is aligned with target
+     */
     public boolean isAligned() {
-        // Check if current angle is close to target
-        return Math.abs(targetAngle - getCurrentAngle()) < ALIGNMENT_TOLERANCE;
+        double currentAngle = getCurrentAngle();
+        return Math.abs(targetAngle - currentAngle) < ALIGNMENT_TOLERANCE;
     }
 
+    /**
+     * Get current turret angle from servo position
+     */
     private double getCurrentAngle() {
-        // Back-calculate from servo position
         double position = turretServo.getPosition();
-        return MIN_ANGLE + (position * (MAX_ANGLE - MIN_ANGLE));
+        return (position - SERVO_CENTER) * (MAX_ANGLE - MIN_ANGLE);
+    }
+
+    /**
+     * Distance to goal in meters (for auto-RPM)
+     */
+    public double distanceToGoalMeters(Pose pose) {
+        double goalX = isRed ? RED_GOAL_X : BLUE_GOAL_X;
+        double goalY = isRed ? RED_GOAL_Y : BLUE_GOAL_Y;
+
+        double dx = goalX - pose.getX();
+        double dy = goalY - pose.getY();
+
+        double inches = Math.hypot(dx, dy);
+        return inches * 0.0254; // inches to meters
+    }
+
+    // ==================== CONTROL ====================
+
+    public void setMode(Mode mode) {
+        currentMode = mode;
+    }
+
+    public void setManualAngle(double angle) {
+        manualAngle = clampAngle(angle);
     }
 
     public Mode getCurrentMode() {
@@ -147,15 +170,5 @@ public class Turret {
 
     public double getTargetAngle() {
         return targetAngle;
-    }
-
-    public double distanceToGoal(Pose pose) {
-        double goalX = isRed ? RED_GOAL_X : BLUE_GOAL_X;
-        double goalY = isRed ? RED_GOAL_Y : BLUE_GOAL_Y;
-
-        double dx = goalX - pose.getX();
-        double dy = goalY - pose.getY();
-
-        return Math.hypot(dx, dy);
     }
 }

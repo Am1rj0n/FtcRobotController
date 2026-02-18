@@ -8,7 +8,7 @@ import com.qualcomm.robotcore.util.Range;
 
 import org.firstinspires.ftc.teamcode.subsystems.Shooter;
 
-@TeleOp(name = "Transfer & Shooter Test", group = "Test")
+@TeleOp(name = "TransferShooterVelocity", group = "Test")
 public class TransferShooterTest extends LinearOpMode {
 
     // Transfer motors
@@ -26,10 +26,10 @@ public class TransferShooterTest extends LinearOpMode {
     public void runOpMode() {
 
         // Initialize transfer motors
-        motor1 = hardwareMap.get(DcMotor.class, "motor1");
-        motor2 = hardwareMap.get(DcMotor.class, "motor2");
+        motor1 = hardwareMap.get(DcMotor.class, "intake");
+        motor2 = hardwareMap.get(DcMotor.class, "transfer");
 
-        motor1.setDirection(DcMotorSimple.Direction.FORWARD);
+        motor1.setDirection(DcMotorSimple.Direction.REVERSE);
         motor2.setDirection(DcMotorSimple.Direction.REVERSE);
 
         motor1.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
@@ -72,7 +72,7 @@ public class TransferShooterTest extends LinearOpMode {
             }
             // Transfer reverse (B button)
             else if (gamepad1.b) {
-                motor1.setPower(-transferSpeed);
+                motor1.setPower(transferSpeed);
                 motor2.setPower(-transferSpeed);
             }
             // Stop transfer

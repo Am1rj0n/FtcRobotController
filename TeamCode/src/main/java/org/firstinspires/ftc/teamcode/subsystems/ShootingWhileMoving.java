@@ -2,9 +2,16 @@ package org.firstinspires.ftc.teamcode.subsystems;
 
 import com.pedropathing.follower.Follower;
 import com.pedropathing.geometry.Pose;
+import com.pedropathing.math.Vector;
 import com.skeletonarmy.marrow.zones.PolygonZone;
 import com.skeletonarmy.marrow.zones.Point;
 
+/**
+ * Shooting While Moving with Marrow Zones
+ * - Fixed flight time (ONE constant to tune)
+ * - Uses Pedro's getVelocity() and getPose()
+ * - Auto-shoots when in designated zones
+ */
 public class ShootingWhileMoving {
 
     private final Follower follower;
@@ -12,12 +19,13 @@ public class ShootingWhileMoving {
     private final Turret turret;
     private final boolean isRed;
 
-    private boolean swmEnabled = false;
+    // ==================== SINGLE TUNING CONSTANT ====================
+    // Tune based on average shot distance
+    // Start at 0.5s, increase if short, decrease if long
+    private static final double FLIGHT_TIME_SECONDS = 0.5;
 
-    // Time for shot to reach goal (seconds)
-    private static final double TIME_IN_AIR = 6.7;
-
-    // Shooting zones (from Marrow example)
+    // ==================== MARROW SHOOT ZONES ====================
+    // These define WHERE on the field auto-shoot can happen
     private final PolygonZone closeLaunchZone = new PolygonZone(
             new Point(144, 144),
             new Point(72, 72),
@@ -30,18 +38,17 @@ public class ShootingWhileMoving {
             new Point(96, 0)
     );
 
-    // Robot zone (14" x 18")
+    // Robot footprint for zone collision detection
     private final PolygonZone robotZone = new PolygonZone(14, 18);
 
-    // Heading lock state
+    private static final double BLUE_GOAL_X = 0.0;
+    private static final double BLUE_GOAL_Y = 144.0;
+    private static final double RED_GOAL_X = 144.0;
+    private static final double RED_GOAL_Y = 144.0;
+
+    private boolean enabled = false;
     private boolean headingLockActive = false;
     private double targetHeading = 0.0;
-
-    // Goal positions
-    private static final double BLUE_GOAL_X = 72.0;
-    private static final double BLUE_GOAL_Y = 72.0;
-    private static final double RED_GOAL_X = 72.0;
-    private static final double RED_GOAL_Y = -72.0;
 
     public ShootingWhileMoving(Follower follower, Shooter shooter, Turret turret, boolean isRed) {
         this.follower = follower;
@@ -51,32 +58,40 @@ public class ShootingWhileMoving {
     }
 
     public void toggle() {
-        swmEnabled = !swmEnabled;
+        enabled = !enabled;
 
-        if (!swmEnabled) {
+        if (!enabled) {
             headingLockActive = false;
         }
     }
 
+    /**
+     * Update - checks if robot is in shoot zones
+     * Call this every loop
+     */
     public void update() {
-        if (!swmEnabled) {
+        if (!enabled) {
             headingLockActive = false;
             return;
         }
 
         Pose currentPose = follower.getPose();
 
-        // Update robot zone position and rotation
+        // Update robot zone position for collision detection
         robotZone.setPosition(currentPose.getX(), currentPose.getY());
         robotZone.setRotation(currentPose.getHeading());
 
-        // Check if robot is in a shoot zone
+        // Check if robot is in either shoot zone
         boolean inShootZone = robotZone.isInside(closeLaunchZone) ||
                 robotZone.isInside(farLaunchZone);
 
         if (inShootZone) {
-            // Calculate and apply heading lock
-            targetHeading = calculateHeadingToGoal(currentPose);
+            // Calculate heading to goal from future position
+            Pose futurePose = getFuturePose();
+            double goalX = isRed ? RED_GOAL_X : BLUE_GOAL_X;
+            double goalY = isRed ? RED_GOAL_Y : BLUE_GOAL_Y;
+
+            targetHeading = Math.atan2(goalY - futurePose.getY(), goalX - futurePose.getX());
             headingLockActive = true;
         } else {
             headingLockActive = false;
@@ -84,44 +99,50 @@ public class ShootingWhileMoving {
     }
 
     /**
-     * Get future pose prediction for moving shots
+     * Future pose using Pedro's velocity
      */
     public Pose getFuturePose() {
-        Pose currentPose = follower.getPose();
+        Pose current = follower.getPose();
+        Vector vel = follower.getVelocity();
 
-        // Get velocity components from follower
-        double velocityX = follower.getVelocity().getMagnitude() *
-                Math.cos(follower.getVelocity().getTheta());
-        double velocityY = follower.getVelocity().getMagnitude() *
-                Math.sin(follower.getVelocity().getTheta());
-
-        double futureX = currentPose.getX() + (TIME_IN_AIR * velocityX);
-        double futureY = currentPose.getY() + (TIME_IN_AIR * velocityY);
-        double futureHeading = currentPose.getHeading();
-
-        return new Pose(futureX, futureY, futureHeading);
+        return new Pose(
+                current.getX() + (vel.getXComponent() * FLIGHT_TIME_SECONDS),
+                current.getY() + (vel.getYComponent() * FLIGHT_TIME_SECONDS),
+                current.getHeading()
+        );
     }
 
     /**
-     * Calculate required heading to face the goal
+     * Heading to shoot from future position
      */
-    private double calculateHeadingToGoal(Pose pose) {
+    public double getTargetHeading() {
+        return targetHeading;
+    }
+
+    /**
+     * Distance for auto-RPM (from future position if SWM, current if not)
+     */
+    public double getDistanceForRPM() {
+        Pose pose = enabled ? getFuturePose() : follower.getPose();
         double goalX = isRed ? RED_GOAL_X : BLUE_GOAL_X;
         double goalY = isRed ? RED_GOAL_Y : BLUE_GOAL_Y;
 
         double dx = goalX - pose.getX();
         double dy = goalY - pose.getY();
-
-        return Math.atan2(dy, dx);
+        return Math.hypot(dx, dy);
     }
 
     /**
-     * Check if all conditions met for auto-shoot
+     * AUTO-SHOOT TRIGGER
+     * Returns true when all conditions met:
+     * - SWM enabled
+     * - Robot in shoot zone
+     * - Turret aligned
+     * - Shooter at speed
      */
     public boolean shouldAutoShoot() {
-        if (!swmEnabled) return false;
+        if (!enabled) return false;
 
-        // Update zones
         Pose currentPose = follower.getPose();
         robotZone.setPosition(currentPose.getX(), currentPose.getY());
         robotZone.setRotation(currentPose.getHeading());
@@ -132,18 +153,9 @@ public class ShootingWhileMoving {
         return inZone && turret.isAligned() && shooter.isAtSpeed();
     }
 
-    public boolean isEnabled() {
-        return swmEnabled;
-    }
-
-    public boolean isHeadingLockActive() {
-        return headingLockActive;
-    }
-
-    public double getTargetHeading() {
-        return targetHeading;
-    }
-
+    /**
+     * Check if currently in a shoot zone
+     */
     public boolean isInShootZone() {
         Pose currentPose = follower.getPose();
         robotZone.setPosition(currentPose.getX(), currentPose.getY());
@@ -151,5 +163,18 @@ public class ShootingWhileMoving {
 
         return robotZone.isInside(closeLaunchZone) ||
                 robotZone.isInside(farLaunchZone);
+    }
+
+    public boolean isEnabled() {
+        return enabled;
+    }
+
+    public boolean isHeadingLockActive() {
+        return headingLockActive;
+    }
+
+    public double getVelocityMagnitude() {
+        Vector vel = follower.getVelocity();
+        return Math.hypot(vel.getXComponent(), vel.getYComponent());
     }
 }

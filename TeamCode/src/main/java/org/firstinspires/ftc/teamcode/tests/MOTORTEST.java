@@ -22,7 +22,7 @@ public class MOTORTEST extends LinearOpMode {
         motor2 = hardwareMap.get(DcMotor.class, "motor2");
 
 
-        motor1.setDirection(DcMotorSimple.Direction.FORWARD);
+        motor1.setDirection(DcMotorSimple.Direction.REVERSE);
         motor2.setDirection(DcMotorSimple.Direction.REVERSE);
 
         motor1.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);

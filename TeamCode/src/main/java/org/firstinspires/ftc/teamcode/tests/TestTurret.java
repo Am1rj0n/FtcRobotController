@@ -71,7 +71,7 @@ public class TestTurret extends OpMode {
         telemetry.addData("│ Mode", turret.getCurrentMode());
         telemetry.addData("│ Target Angle", "%.1f°", turret.getTargetAngle());
         telemetry.addData("│ Aligned", turret.isAligned() ? "YES" : "NO");
-        telemetry.addData("│ Distance", "%.1f in", turret.distanceToGoal(pose));
+        telemetry.addData("│ Distance", "%.1f in", turret.distanceToGoalMeters(pose));
         telemetry.addData("│ Tag ID", limelight.getDetectedTagId());
         telemetry.addData("│ TX", "%.1f°", limelight.getTx());
         telemetry.addLine("╚═══════════════════╝");

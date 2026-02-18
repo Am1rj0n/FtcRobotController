@@ -6,13 +6,13 @@ import com.qualcomm.robotcore.util.ElapsedTime;
 import com.pedropathing.follower.Follower;
 import com.pedropathing.geometry.Pose;
 
+import org.firstinspires.ftc.teamcode.subsystems.AutoToTeleTransfer;
 import org.firstinspires.ftc.teamcode.pedroPathing.Constants;
 import org.firstinspires.ftc.teamcode.subsystems.*;
 
 @TeleOp(name = "Red TeleOp", group = "Competition")
 public class RedTeleOp extends OpMode {
 
-    // Subsystems
     private Drivetrain drivetrain;
     private Intake intake;
     private Shooter shooter;
@@ -20,13 +20,11 @@ public class RedTeleOp extends OpMode {
     private Limelight limelight;
     private ShootingWhileMoving swm;
 
-
     private Follower follower;
-    private ElapsedTime runtime = new ElapsedTime();
+    private final ElapsedTime runtime = new ElapsedTime();
 
-    private static final boolean IS_RED = true;
+    private static final boolean IS_RED = true; // Only difference from Blue
 
-    // Debouncing
     private boolean lastSquare = false;
     private boolean lastCross = false;
     private boolean lastTriangle = false;
@@ -38,18 +36,14 @@ public class RedTeleOp extends OpMode {
     private boolean lastOptions = false;
     private boolean lastDpadDown = false;
     private boolean lastDpadRight = false;
-
-    // Gamepad 2 debouncing
     private boolean lastGP2L1 = false;
     private boolean lastGP2R1 = false;
+    private boolean lastGP2DpadUp = false; // MegaTag localization
 
     @Override
     public void init() {
-        // Initialize Pedro follower
         follower = Constants.createFollower(hardwareMap);
 
-
-        // Initialize subsystems
         limelight = new Limelight(hardwareMap, IS_RED);
         drivetrain = new Drivetrain(hardwareMap, follower, IS_RED);
         intake = new Intake(hardwareMap);
@@ -57,10 +51,23 @@ public class RedTeleOp extends OpMode {
         turret = new Turret(hardwareMap, limelight, IS_RED);
         swm = new ShootingWhileMoving(follower, shooter, turret, IS_RED);
 
+        telemetry.addLine("=== INIT ===");
+        telemetry.addLine("Waiting for Start...");
+        telemetry.addData("Auto Pose Available", AutoToTeleTransfer.finalPose != null);
+        telemetry.update();
     }
 
     @Override
     public void start() {
+        // USE AUTO'S FINAL POSITION
+        if (AutoToTeleTransfer.finalPose != null) {
+            follower.setStartingPose(AutoToTeleTransfer.finalPose);
+            gamepad1.rumble(500); // Confirm auto pose loaded
+        } else {
+            // Default starting position if auto wasn't run
+            follower.setStartingPose(new Pose(72, 8, Math.toRadians(90)));
+        }
+
         follower.startTeleopDrive();
         limelight.start();
         runtime.reset();
@@ -68,27 +75,33 @@ public class RedTeleOp extends OpMode {
 
     @Override
     public void loop() {
-        // Update follower
         follower.update();
 
-        // Update limelight localization
-        limelight.updateLocalization(follower, runtime.seconds());
+        // CRITICAL: Update robot orientation for MegaTag2 every loop
+        limelight.updateMegaTag2Orientation(follower);
 
-        // Handle inputs
+
         handleDrive();
-        handleIntakeModes();
-        handleShooterControls();
-        handleTurretControls();
+        handleIntake();
+        handleShooter();
+        handleTurret();
         handleSWM();
+        handleLocalization(); // MegaTag and corner reset
 
-        // Update subsystems
-        shooter.periodic(); // CRITICAL - must call every loop
+        if (shooter.isActive()) {
+            double distanceMeters = swm.getDistanceForRPM() * 0.0254;
+            shooter.setRPMForDistance(distanceMeters);
+        }
+
+        shooter.periodic();
         turret.update(follower.getPose());
-        swm.update();
+        swm.update(); // Check zones and update heading lock
 
+        // Auto-shoot when in zone
+        if (swm.shouldAutoShoot()) {
+            intake.setMode(Intake.Mode.SHOOT);
+        }
 
-
-        // Display telemetry
         displayTelemetry();
     }
 
@@ -100,13 +113,11 @@ public class RedTeleOp extends OpMode {
         limelight.stop();
     }
 
-    // ==================== DRIVE CONTROL ====================
     private void handleDrive() {
         double forward = -gamepad1.left_stick_y;
         double strafe = gamepad1.left_stick_x;
         double turn = gamepad1.right_stick_x;
 
-        // Position hold toggle (Touchpad)
         if (gamepad1.touchpad && !lastTouchpad) {
             drivetrain.toggleHold();
             if (drivetrain.isHolding()) {
@@ -115,98 +126,66 @@ public class RedTeleOp extends OpMode {
         }
         lastTouchpad = gamepad1.touchpad;
 
-        // Corner reset (Share)
         if (gamepad1.share) {
             drivetrain.resetToCorner();
             gamepad1.rumbleBlips(2);
         }
 
-        // Speed control (L1/R1)
         if (gamepad1.left_bumper) drivetrain.decreaseSpeed();
         if (gamepad1.right_bumper) drivetrain.increaseSpeed();
 
-        // Field-centric reset (R3)
-        boolean r3 = gamepad1.right_stick_button;
-        if (r3 && !lastR3) {
+        if (gamepad1.right_stick_button && !lastR3) {
             drivetrain.resetFieldCentric();
             gamepad1.rumble(200);
         }
-        lastR3 = r3;
-
-        // Apply heading lock if SWM active and in zone
-        if (swm.isHeadingLockActive()) {
-            drivetrain.setHeadingLock(swm.getTargetHeading());
-        } else {
-            drivetrain.releaseHeadingLock();
-        }
+        lastR3 = gamepad1.right_stick_button;
 
         drivetrain.drive(forward, strafe, turn);
     }
 
-    // ==================== INTAKE MODES ====================
-    private void handleIntakeModes() {
-        boolean square = gamepad1.square;
-        boolean cross = gamepad1.cross;
-        boolean triangle = gamepad1.triangle;
-        boolean circle = gamepad1.circle;
-
-        if (square && !lastSquare) {
+    private void handleIntake() {
+        if (gamepad1.square && !lastSquare) {
             intake.setMode(Intake.Mode.OFF);
         }
-        if (cross && !lastCross) {
+        if (gamepad1.cross && !lastCross) {
             intake.setMode(Intake.Mode.INTAKE);
         }
-        if (triangle && !lastTriangle) {
+        if (gamepad1.triangle && !lastTriangle) {
             intake.setMode(Intake.Mode.SPIT);
         }
-        if (circle && !lastCircle) {
-            // Auto-shoot if conditions met, otherwise manual shoot
-            if (swm.shouldAutoShoot()) {
-                intake.setMode(Intake.Mode.SHOOT);
-            } else {
-                intake.setMode(Intake.Mode.SHOOT);
-            }
+        if (gamepad1.circle && !lastCircle) {
+            intake.setMode(Intake.Mode.SHOOT);
         }
 
-        lastSquare = square;
-        lastCross = cross;
-        lastTriangle = triangle;
-        lastCircle = circle;
+        lastSquare = gamepad1.square;
+        lastCross = gamepad1.cross;
+        lastTriangle = gamepad1.triangle;
+        lastCircle = gamepad1.circle;
     }
 
-    // ==================== SHOOTER CONTROLS ====================
-    private void handleShooterControls() {
-        // D-Pad Down: Toggle shooter ON/OFF
-        boolean dpadDown = gamepad1.dpad_down;
-        if (dpadDown && !lastDpadDown) {
+    private void handleShooter() {
+        if (gamepad1.dpad_down && !lastDpadDown) {
             shooter.toggle();
         }
-        lastDpadDown = dpadDown;
+        lastDpadDown = gamepad1.dpad_down;
 
-        // D-Pad Right: Toggle Close/Far mode
-        boolean dpadRight = gamepad1.dpad_right;
-        if (dpadRight && !lastDpadRight) {
+        if (gamepad1.dpad_right && !lastDpadRight) {
             shooter.toggleMode();
         }
-        lastDpadRight = dpadRight;
+        lastDpadRight = gamepad1.dpad_right;
 
-        // Gamepad 2: Fine RPM adjustment
-        boolean gp2L1 = gamepad2.left_bumper;
-        boolean gp2R1 = gamepad2.right_bumper;
-
-        if (gp2L1 && !lastGP2L1) {
+        if (gamepad2.left_bumper && !lastGP2L1) {
             shooter.decreaseRPM();
         }
-        if (gp2R1 && !lastGP2R1) {
+        if (gamepad2.right_bumper && !lastGP2R1) {
             shooter.increaseRPM();
         }
 
-        lastGP2L1 = gp2L1;
-        lastGP2R1 = gp2R1;
+        lastGP2L1 = gamepad2.left_bumper;
+        lastGP2R1 = gamepad2.right_bumper;
     }
 
-    // ==================== TURRET CONTROLS ====================
-    private void handleTurretControls() {
+    private void handleTurret() {
         boolean l2 = gamepad1.left_trigger > 0.5;
         boolean r2 = gamepad1.right_trigger > 0.5;
 
@@ -217,14 +196,12 @@ public class RedTeleOp extends OpMode {
             turret.setMode(Turret.Mode.ODOMETRY);
         }
 
-        // If neither trigger pressed, allow manual control
         if (!l2 && !r2) {
             turret.setMode(Turret.Mode.MANUAL);
 
-            // Gamepad 2 manual override
             double manualInput = gamepad2.left_stick_x;
             if (Math.abs(manualInput) > 0.1) {
-                turret.setManualAngle(manualInput * 58.0); // Scale to ±58°
+                turret.setManualAngle(manualInput * 58.0);
             }
         }
 
@@ -232,11 +209,8 @@ public class RedTeleOp extends OpMode {
         lastR2 = r2;
     }
 
-    // ==================== SHOOTING WHILE MOVING ====================
     private void handleSWM() {
-        boolean options = gamepad1.options;
-
-        if (options && !lastOptions) {
+        if (gamepad1.options && !lastOptions) {
             swm.toggle();
             if (swm.isEnabled()) {
                 gamepad1.rumble(500);
@@ -244,17 +218,24 @@ public class RedTeleOp extends OpMode {
                 gamepad1.rumbleBlips(2);
             }
         }
-        lastOptions = options;
-
-        // Auto-shoot trigger
-        if (swm.shouldAutoShoot()) {
-            intake.setMode(Intake.Mode.SHOOT);
-        }
+        lastOptions = gamepad1.options;
     }
 
+    private void handleLocalization() {
+        // MEGATAG2 LOCALIZATION - Gamepad 2 D-Pad Up
+        if (gamepad2.dpad_up && !lastGP2DpadUp) {
+            boolean success = limelight.megaTag2Localize(follower);
 
+            if (success) {
+                gamepad2.rumble(1000); // Long rumble = success
+                gamepad1.rumble(500);  // Notify driver too
+            } else {
+                gamepad2.rumbleBlips(3); // Triple blip = failed
+            }
+        }
+        lastGP2DpadUp = gamepad2.dpad_up;
+    }
 
-    // ==================== TELEMETRY ====================
     private void displayTelemetry() {
         Pose pose = follower.getPose();
 
@@ -262,11 +243,9 @@ public class RedTeleOp extends OpMode {
         telemetry.addData("│ Intake", intake.getCurrentMode());
         telemetry.addData("│ Speed", "%.0f%%", drivetrain.getSpeed() * 100);
 
-        telemetry.addLine("╠═══ POSITION ═══╣");
+        telemetry.addLine("╠═══ LOCALIZATION ═══╣");
         telemetry.addData("│ X / Y", "%.1f, %.1f", pose.getX(), pose.getY());
         telemetry.addData("│ Heading", "%.1f°", Math.toDegrees(pose.getHeading()));
-        telemetry.addData("│ Hold", drivetrain.isHolding() ? "LOCKED" : "Free");
-        telemetry.addData("│ H-Lock", drivetrain.isHeadingLocked() ? "ACTIVE" : "Off");
 
         telemetry.addLine("╠═══ SHOOTER ═══╣");
         telemetry.addData("│ %s", shooter.getTelemetryString());
@@ -275,20 +254,22 @@ public class RedTeleOp extends OpMode {
         telemetry.addData("│ Mode", turret.getCurrentMode());
         telemetry.addData("│ Angle", "%.1f°", turret.getTargetAngle());
         telemetry.addData("│ Aligned", turret.isAligned() ? "YES" : "NO");
-        telemetry.addData("│ Distance", "%.1f in", turret.distanceToGoal(pose));
 
         telemetry.addLine("╠═══ LIMELIGHT ═══╣");
         telemetry.addData("│ Tag ID", limelight.getDetectedTagId());
+        telemetry.addData("│ Visible Tags", limelight.getVisibleTagCount());
         telemetry.addData("│ TX", "%.1f°", limelight.getTx());
-        telemetry.addData("│ Last Update", "%.1fs ago", runtime.seconds() - limelight.getLastUpdateTime());
+        telemetry.addData("│ MegaTag2", "GP2 D-Up");
 
         telemetry.addLine("╠═══ SWM ═══╣");
         telemetry.addData("│ Enabled", swm.isEnabled() ? "YES" : "NO");
         telemetry.addData("│ In Zone", swm.isInShootZone() ? "YES" : "NO");
+        telemetry.addData("│ Heading Lock", swm.isHeadingLockActive() ? "ACTIVE" : "Off");
         telemetry.addData("│ Auto-Shoot", swm.shouldAutoShoot() ? "READY" : "Waiting");
+        telemetry.addData("│ Velocity", "%.1f in/s", swm.getVelocityMagnitude());
+        telemetry.addData("│ Distance", "%.1f in", swm.getDistanceForRPM());
 
         telemetry.addLine("╚════════════════════╝");
         telemetry.update();
     }
-
 }

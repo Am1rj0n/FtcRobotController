@@ -12,29 +12,30 @@ import org.firstinspires.ftc.robotcore.external.navigation.Pose3D;
 
 import java.util.List;
 
+/**
+ * Limelight - Pure Odometry + MegaTag2 on demand
+ *
+ * Fusion localization has been removed.
+ * Pedro Pinpoint handles all continuous localization.
+ * MegaTag2 is used only when triggered by button press to correct drift.
+ */
 public class Limelight {
 
     private final Limelight3A limelight;
     private final boolean isRed;
 
     private int detectedTagId = -1;
-    private double lastUpdateTime = 0;
 
-    // Alignment tags
+    // Alignment tags for turret tracking
     private static final int BLUE_ALIGNMENT_TAG = 20;
     private static final int RED_ALIGNMENT_TAG = 24;
-
-    // Localization update settings
-    private static final double MIN_UPDATE_INTERVAL = 2.0; // seconds
-    private static final int MIN_DETECTIONS_FOR_UPDATE = 3;
-    private int consecutiveDetections = 0;
 
     public Limelight(HardwareMap hardwareMap, boolean isRed) {
         limelight = hardwareMap.get(Limelight3A.class, "limelight");
         this.isRed = isRed;
 
         limelight.pipelineSwitch(0); // AprilTag pipeline
-        limelight.setPollRateHz(250);
+        limelight.setPollRateHz(100);
     }
 
     public void start() {
@@ -47,15 +48,18 @@ public class Limelight {
         }
     }
 
+    // ==================== TURRET HELPERS ====================
+
+    /**
+     * Detect AprilTag - updates detectedTagId
+     */
     public boolean detectAprilTag() {
         LLResult result = limelight.getLatestResult();
 
         if (result != null && result.isValid()) {
             List<LLResultTypes.FiducialResult> fiducialResults = result.getFiducialResults();
-
             if (!fiducialResults.isEmpty()) {
-                LLResultTypes.FiducialResult fiducialResult = fiducialResults.get(0);
-                detectedTagId = fiducialResult.getFiducialId();
+                detectedTagId = fiducialResults.get(0).getFiducialId();
                 return true;
             }
         }
@@ -64,103 +68,105 @@ public class Limelight {
         return false;
     }
 
-    public boolean isAlignmentTagVisible(int targetTag) {
+    /**
+     * Check if alignment tag for this alliance is visible
+     */
+    public boolean isAlignmentTagVisible() {
         detectAprilTag();
+        int targetTag = isRed ? RED_ALIGNMENT_TAG : BLUE_ALIGNMENT_TAG;
         return detectedTagId == targetTag;
     }
 
+    /**
+     * Horizontal offset to target (for turret Limelight mode)
+     */
     public double getTx() {
         LLResult result = limelight.getLatestResult();
-
         if (result != null && result.isValid()) {
             List<LLResultTypes.FiducialResult> fiducialResults = result.getFiducialResults();
-
             if (!fiducialResults.isEmpty()) {
-                LLResultTypes.FiducialResult fiducialResult = fiducialResults.get(0);
-                return fiducialResult.getTargetXDegrees();
+                return fiducialResults.get(0).getTargetXDegrees();
             }
         }
-
-        return 0.0;
-    }
-
-    public double getTy() {
-        LLResult result = limelight.getLatestResult();
-
-        if (result != null && result.isValid()) {
-            List<LLResultTypes.FiducialResult> fiducialResults = result.getFiducialResults();
-
-            if (!fiducialResults.isEmpty()) {
-                LLResultTypes.FiducialResult fiducialResult = fiducialResults.get(0);
-                return fiducialResult.getTargetYDegrees();
-            }
-        }
-
         return 0.0;
     }
 
     /**
-     * Update robot localization using Limelight bot pose
+     * Vertical offset to target
      */
-    public void updateLocalization(Follower follower, double currentTime) {
-        // Rate limit updates
-        if (currentTime - lastUpdateTime < MIN_UPDATE_INTERVAL) {
-            return;
-        }
-
-        int targetTag = isRed ? RED_ALIGNMENT_TAG : BLUE_ALIGNMENT_TAG;
-
-        if (!isAlignmentTagVisible(targetTag)) {
-            consecutiveDetections = 0;
-            return;
-        }
-
-        consecutiveDetections++;
-
-        // Require multiple consecutive detections for confidence
-        if (consecutiveDetections < MIN_DETECTIONS_FOR_UPDATE) {
-            return;
-        }
-
+    public double getTy() {
         LLResult result = limelight.getLatestResult();
-        if (result == null || !result.isValid()) {
-            return;
+        if (result != null && result.isValid()) {
+            List<LLResultTypes.FiducialResult> fiducialResults = result.getFiducialResults();
+            if (!fiducialResults.isEmpty()) {
+                return fiducialResults.get(0).getTargetYDegrees();
+            }
         }
-
-        Pose3D botPose = result.getBotpose();
-        if (botPose == null) {
-            return;
-        }
-
-        // Convert Limelight coordinates to field coordinates
-        // Limelight bot pose is in meters, convert to inches
-        double fieldX = 72.0 + (botPose.getPosition().y * 39.37);
-        double fieldY = 72.0 - (botPose.getPosition().x * 39.37);
-        double rawHeading = botPose.getOrientation().getYaw(AngleUnit.DEGREES);
-
-        // Normalize heading
-        if (rawHeading < 0) {
-            rawHeading += 360;
-        }
-        double fieldHeading = Math.toRadians(rawHeading - 90);
-
-        // Update follower pose
-        follower.setPose(new Pose(fieldX, fieldY, fieldHeading));
-
-        lastUpdateTime = currentTime;
-        consecutiveDetections = 0;
+        return 0.0;
     }
 
-    public boolean hasValidBotPose() {
+    // ==================== MEGATAG2 ON-DEMAND LOCALIZATION ====================
+
+    /**
+     * MEGATAG2 LOCALIZATION - Call this on button press only.
+     *
+     * Fully overrides Pedro's pose with vision estimate.
+     * Much more accurate than MegaTag1 - eliminates ambiguity using robot heading.
+     *
+     * REQUIRES: updateMegaTag2Orientation() called every loop BEFORE this.
+     *
+     * @return true if localization succeeded, false if no tags visible
+     */
+    public boolean megaTag2Localize(Follower follower) {
         LLResult result = limelight.getLatestResult();
-        return result != null && result.isValid() && result.getBotpose() != null;
+
+        if (result == null || !result.isValid()) {
+            return false;
+        }
+
+        Pose3D botpose_mt2 = result.getBotpose_MT2();
+        if (botpose_mt2 == null) {
+            return false;
+        }
+
+        List<LLResultTypes.FiducialResult> fiducialResults = result.getFiducialResults();
+        if (fiducialResults.isEmpty()) {
+            return false;
+        }
+
+        // Convert MegaTag2 pose (meters) to Pedro field coordinates (inches)
+        double visionX = botpose_mt2.getPosition().x * 39.37;
+        double visionY = botpose_mt2.getPosition().y * 39.37;
+
+        double rawHeading = botpose_mt2.getOrientation().getYaw(AngleUnit.DEGREES);
+        if (rawHeading < 0) rawHeading += 360;
+        double visionHeading = Math.toRadians(rawHeading);
+
+        // Full pose override - trust MegaTag2 completely
+        follower.setPose(new Pose(visionX, visionY, visionHeading));
+
+        return true;
+    }
+
+    /**
+     * Update robot orientation for MegaTag2.
+     * MUST be called every loop for MegaTag2 to work correctly.
+     * Sends current robot yaw from Pedro/Pinpoint to the Limelight.
+     */
+    public void updateMegaTag2Orientation(Follower follower) {
+        double robotYaw = Math.toDegrees(follower.getHeading());
+        limelight.updateRobotOrientation(robotYaw);
+    }
+
+    // ==================== TELEMETRY HELPERS ====================
+
+    public int getVisibleTagCount() {
+        LLResult result = limelight.getLatestResult();
+        if (result == null || !result.isValid()) return 0;
+        return result.getFiducialResults().size();
     }
 
     public int getDetectedTagId() {
         return detectedTagId;
-    }
-
-    public double getLastUpdateTime() {
-        return lastUpdateTime;
     }
 }

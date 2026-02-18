@@ -11,7 +11,7 @@ public class Intake {
 
     // Motor speeds for different modes
     private static final double INTAKE_SPEED = 0.9;
-    private static final double TRANSFER_INTAKE_SPEED = -0.1;
+    private static final double TRANSFER_INTAKE_SPEED = -0.7;
     private static final double SPIT_SPEED = -0.8;
     private static final double SHOOT_SPEED = 1.0;
 
@@ -28,8 +28,8 @@ public class Intake {
         intakeMotor = hardwareMap.dcMotor.get("intake");
         transferMotor = hardwareMap.dcMotor.get("transfer");
 
-        intakeMotor.setDirection(DcMotorSimple.Direction.FORWARD);
-        transferMotor.setDirection(DcMotorSimple.Direction.FORWARD);
+        intakeMotor.setDirection(DcMotorSimple.Direction.REVERSE);
+        transferMotor.setDirection(DcMotorSimple.Direction.REVERSE);
 
         intakeMotor.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
         transferMotor.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
