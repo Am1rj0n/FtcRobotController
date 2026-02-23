@@ -61,12 +61,6 @@ public class TestSWM extends OpMode {
         double strafe = gamepad1.left_stick_x;
         double turn = gamepad1.right_stick_x;
 
-        // Apply heading lock if in zone
-        if (swm.isHeadingLockActive()) {
-            drivetrain.setHeadingLock(swm.getTargetHeading());
-        } else {
-            drivetrain.releaseHeadingLock();
-        }
 
         drivetrain.drive(forward, strafe, turn);
 
@@ -81,9 +75,7 @@ public class TestSWM extends OpMode {
 
         telemetry.addLine("╔═══ SWM TEST ═══╗");
         telemetry.addData("│ SWM Enabled", swm.isEnabled() ? "YES" : "NO");
-        telemetry.addData("│ In Shoot Zone", swm.isInShootZone() ? "YES" : "NO");
         telemetry.addData("│ H-Lock Active", swm.isHeadingLockActive() ? "YES" : "NO");
-        telemetry.addData("│ Should Auto-Shoot", swm.shouldAutoShoot() ? "READY" : "NO");
         telemetry.addLine("╠═══ CURRENT POSE ═══╣");
         telemetry.addData("│ X", "%.1f", pose.getX());
         telemetry.addData("│ Y", "%.1f", pose.getY());

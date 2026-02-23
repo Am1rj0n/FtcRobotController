@@ -29,7 +29,7 @@ public class Intake {
         transferMotor = hardwareMap.dcMotor.get("transfer");
 
         intakeMotor.setDirection(DcMotorSimple.Direction.REVERSE);
-        transferMotor.setDirection(DcMotorSimple.Direction.REVERSE);
+        transferMotor.setDirection(DcMotorSimple.Direction.FORWARD);
 
         intakeMotor.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
         transferMotor.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);

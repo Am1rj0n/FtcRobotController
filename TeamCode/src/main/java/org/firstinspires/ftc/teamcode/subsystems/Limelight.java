@@ -12,13 +12,6 @@ import org.firstinspires.ftc.robotcore.external.navigation.Pose3D;
 
 import java.util.List;
 
-/**
- * Limelight - Pure Odometry + MegaTag2 on demand
- *
- * Fusion localization has been removed.
- * Pedro Pinpoint handles all continuous localization.
- * MegaTag2 is used only when triggered by button press to correct drift.
- */
 public class Limelight {
 
     private final Limelight3A limelight;
@@ -34,7 +27,7 @@ public class Limelight {
         limelight = hardwareMap.get(Limelight3A.class, "limelight");
         this.isRed = isRed;
 
-        limelight.pipelineSwitch(0); // AprilTag pipeline
+        limelight.pipelineSwitch(1); // AprilTag pipeline
         limelight.setPollRateHz(100);
     }
 
@@ -50,9 +43,6 @@ public class Limelight {
 
     // ==================== TURRET HELPERS ====================
 
-    /**
-     * Detect AprilTag - updates detectedTagId
-     */
     public boolean detectAprilTag() {
         LLResult result = limelight.getLatestResult();
 
@@ -68,18 +58,12 @@ public class Limelight {
         return false;
     }
 
-    /**
-     * Check if alignment tag for this alliance is visible
-     */
     public boolean isAlignmentTagVisible() {
         detectAprilTag();
         int targetTag = isRed ? RED_ALIGNMENT_TAG : BLUE_ALIGNMENT_TAG;
         return detectedTagId == targetTag;
     }
 
-    /**
-     * Horizontal offset to target (for turret Limelight mode)
-     */
     public double getTx() {
         LLResult result = limelight.getLatestResult();
         if (result != null && result.isValid()) {
@@ -91,9 +75,6 @@ public class Limelight {
         return 0.0;
     }
 
-    /**
-     * Vertical offset to target
-     */
     public double getTy() {
         LLResult result = limelight.getLatestResult();
         if (result != null && result.isValid()) {
@@ -107,16 +88,6 @@ public class Limelight {
 
     // ==================== MEGATAG2 ON-DEMAND LOCALIZATION ====================
 
-    /**
-     * MEGATAG2 LOCALIZATION - Call this on button press only.
-     *
-     * Fully overrides Pedro's pose with vision estimate.
-     * Much more accurate than MegaTag1 - eliminates ambiguity using robot heading.
-     *
-     * REQUIRES: updateMegaTag2Orientation() called every loop BEFORE this.
-     *
-     * @return true if localization succeeded, false if no tags visible
-     */
     public boolean megaTag2Localize(Follower follower) {
         LLResult result = limelight.getLatestResult();
 
@@ -148,11 +119,6 @@ public class Limelight {
         return true;
     }
 
-    /**
-     * Update robot orientation for MegaTag2.
-     * MUST be called every loop for MegaTag2 to work correctly.
-     * Sends current robot yaw from Pedro/Pinpoint to the Limelight.
-     */
     public void updateMegaTag2Orientation(Follower follower) {
         double robotYaw = Math.toDegrees(follower.getHeading());
         limelight.updateRobotOrientation(robotYaw);

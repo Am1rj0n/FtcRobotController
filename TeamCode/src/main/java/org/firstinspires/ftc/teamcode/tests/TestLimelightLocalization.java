@@ -10,20 +10,6 @@ import org.firstinspires.ftc.teamcode.pedroPathing.Constants;
 import org.firstinspires.ftc.teamcode.subsystems.Drivetrain;
 import org.firstinspires.ftc.teamcode.subsystems.Limelight;
 
-/**
- * Limelight Localization Test - MegaTag2 only, no fusion
- *
- * Hardware used:
- *   Drive motors (via Pedro)
- *   Pinpoint odometry (inside Pedro)
- *   limelight (Limelight3A)
- *
- * Controls:
- *   GP1 Left/Right Stick  - Drive
- *   GP1 D-Pad Up          - MegaTag2 localize (full pose override)
- *   GP1 Share             - Reset pose to center (72, 72)
- *   GP1 R3                - Reset field-centric heading
- */
 @TeleOp(name = "Test: Limelight Localization", group = "Tests")
 public class TestLimelightLocalization extends OpMode {
 
