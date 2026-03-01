@@ -1,12 +1,17 @@
 package org.firstinspires.ftc.teamcode.teleop;
 
+import com.qualcomm.hardware.rev.RevHubOrientationOnRobot;
 import com.qualcomm.robotcore.eventloop.opmode.OpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
+import com.qualcomm.robotcore.hardware.DcMotor;
+import com.qualcomm.robotcore.hardware.DcMotorSimple;
+import com.qualcomm.robotcore.hardware.IMU;
 import com.qualcomm.robotcore.hardware.Servo;
 import com.qualcomm.robotcore.util.ElapsedTime;
 import com.pedropathing.follower.Follower;
 import com.pedropathing.geometry.Pose;
 
+import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
 import org.firstinspires.ftc.teamcode.subsystems.AutoPositionSubsystem;
 import org.firstinspires.ftc.teamcode.subsystems.AutoToTeleTransfer;
 import org.firstinspires.ftc.teamcode.pedroPathing.Constants;
@@ -18,9 +23,18 @@ public class NoTurretBlueTeleOp extends OpMode {
     private static final boolean IS_RED        = false;
     private static final double  TURRET_CENTER = 0.5;
 
-    // Set to true to enable field-centric
-    private static final boolean FIELD_CENTRIC = false;
+    // GM0 field-centric - direct motor control (same as SafeTeleOp)
+    private DcMotor frontLeft, frontRight, backLeft, backRight;
+    private IMU     imu;
+    private double  fieldCentricOffset = 0.0;
 
+    private static final boolean FIELD_CENTRIC  = true;
+    private double speedMultiplier = 0.7;
+    private static final double MIN_SPEED       = 0.1;
+    private static final double MAX_SPEED       = 1.0;
+    private static final double SPEED_INCREMENT = 0.1;
+
+    // Pedro for odometry, autoPos, SWM only
     private Drivetrain            drivetrain;
     private Intake                intake;
     private Shooter               shooter;
@@ -32,18 +46,20 @@ public class NoTurretBlueTeleOp extends OpMode {
 
     private final ElapsedTime runtime = new ElapsedTime();
 
-    // GP1 debounce
+    // GP1
     private boolean lastCircle   = false;
     private boolean lastCross    = false;
     private boolean lastSquare   = false;
     private boolean lastTriangle = false;
+    private boolean lastL1       = false;
+    private boolean lastR1       = false;
     private boolean lastL2       = false;
     private boolean lastR2       = false;
     private boolean lastR3       = false;
     private boolean lastTouchpad = false;
     private boolean lastOptions  = false;
 
-    // GP2 debounce
+    // GP2
     private boolean lastGP2R2       = false;
     private boolean lastGP2DpadUp   = false;
     private boolean lastGP2DpadDown = false;
@@ -55,9 +71,35 @@ public class NoTurretBlueTeleOp extends OpMode {
     private boolean lastGP2L1       = false;
     private boolean lastGP2R1       = false;
     private boolean lastGP2Share    = false;
+    private boolean lastGP2DpadRight = false;
+
+    // Track whether gate cycle is active (intake stays on after completion)
+    private boolean gateCycleActive = false;
 
     @Override
     public void init() {
+        frontLeft  = hardwareMap.get(DcMotor.class, "front_left_motor");
+        frontRight = hardwareMap.get(DcMotor.class, "front_right_motor");
+        backLeft   = hardwareMap.get(DcMotor.class, "back_left_motor");
+        backRight  = hardwareMap.get(DcMotor.class, "back_right_motor");
+
+        frontLeft.setDirection(DcMotorSimple.Direction.REVERSE);
+        backLeft.setDirection(DcMotorSimple.Direction.REVERSE);
+        frontRight.setDirection(DcMotorSimple.Direction.FORWARD);
+        backRight.setDirection(DcMotorSimple.Direction.FORWARD);
+
+        frontLeft.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
+        frontRight.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
+        backLeft.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
+        backRight.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
+
+        imu = hardwareMap.get(IMU.class, "imu");
+        imu.initialize(new IMU.Parameters(new RevHubOrientationOnRobot(
+                RevHubOrientationOnRobot.LogoFacingDirection.RIGHT,
+                RevHubOrientationOnRobot.UsbFacingDirection.UP
+        )));
+        imu.resetYaw();
+
         follower   = Constants.createFollower(hardwareMap);
         limelight  = new Limelight(hardwareMap, IS_RED);
         drivetrain = new Drivetrain(hardwareMap, follower, IS_RED);
@@ -69,6 +111,7 @@ public class NoTurretBlueTeleOp extends OpMode {
 
         turretServo = hardwareMap.servo.get("turret");
         turretServo.setPosition(TURRET_CENTER);
+
 
         telemetry.addData("Status",    "No Turret Blue - Ready");
         telemetry.addData("Auto Pose", AutoToTeleTransfer.finalPose != null ? "YES" : "NO");
@@ -84,6 +127,10 @@ public class NoTurretBlueTeleOp extends OpMode {
             follower.setStartingPose(new Pose(72, 8, Math.toRadians(90)));
         }
         follower.startTeleopDrive();
+
+        imu.resetYaw();
+        fieldCentricOffset = imu.getRobotYawPitchRollAngles().getYaw(AngleUnit.RADIANS);
+
         limelight.start();
         turretServo.setPosition(TURRET_CENTER);
         runtime.reset();
@@ -107,12 +154,6 @@ public class NoTurretBlueTeleOp extends OpMode {
         handleGP2Shooter();
         handleGP2Localization();
 
-        if (swm.isHeadingLockActive()) {
-            drivetrain.setHeadingLock(swm.getTargetHeading());
-        } else {
-            drivetrain.releaseHeadingLock();
-        }
-
         if (shooter.isActive()) {
             shooter.setRPMForDistance(swm.getDistanceForRPM() * 0.0254);
         }
@@ -125,74 +166,68 @@ public class NoTurretBlueTeleOp extends OpMode {
     public void stop() {
         shooter.stop();
         intake.stop();
-        drivetrain.stop();
         limelight.stop();
         autoPos.cancel();
+        frontLeft.setPower(0);
+        frontRight.setPower(0);
+        backLeft.setPower(0);
+        backRight.setPower(0);
     }
 
     private void handleGP1Drive() {
-        if (autoPos.isActive()) {
-            boolean moving = Math.abs(gamepad1.left_stick_x)  > 0.1
-                    || Math.abs(gamepad1.left_stick_y)  > 0.1
-                    || Math.abs(gamepad1.right_stick_x) > 0.1;
-            if (moving) autoPos.cancel();
+        // OVERRIDE: any GP1 stick movement always cancels auto-position
+        boolean moving = Math.abs(gamepad1.left_stick_x)  > 0.1
+                || Math.abs(gamepad1.left_stick_y)  > 0.1
+                || Math.abs(gamepad1.right_stick_x) > 0.1;
+        if (moving) {
+            autoPos.cancel();
+            gateCycleActive = false;
         }
 
-        double forward = -gamepad1.left_stick_y;
-        double strafe  =  gamepad1.left_stick_x;
-        double turn    =  gamepad1.right_stick_x;
+        double y  = -gamepad1.left_stick_y;
+        double x  =  gamepad1.left_stick_x;
+        double rx =  gamepad1.right_stick_x;
 
+        if (gamepad1.left_bumper && !lastL1)
+            speedMultiplier = Math.max(MIN_SPEED, speedMultiplier - SPEED_INCREMENT);
+        if (gamepad1.right_bumper && !lastR1)
+            speedMultiplier = Math.min(MAX_SPEED, speedMultiplier + SPEED_INCREMENT);
+        lastL1 = gamepad1.left_bumper;
+        lastR1 = gamepad1.right_bumper;
+
+        if (gamepad1.right_stick_button && !lastR3) {
+            fieldCentricOffset = imu.getRobotYawPitchRollAngles().getYaw(AngleUnit.RADIANS);
+            gamepad1.rumble(200);
+        }
+        lastR3 = gamepad1.right_stick_button;
+
+        // Touchpad - position hold (Pedro holds pose, motors stop)
         if (gamepad1.touchpad && !lastTouchpad) {
             drivetrain.toggleHold();
             if (drivetrain.isHolding()) gamepad1.rumble(500);
         }
         lastTouchpad = gamepad1.touchpad;
 
+        // Share - reset odometry to alliance corner
         if (gamepad1.share) {
             drivetrain.resetToCorner();
             gamepad1.rumbleBlips(2);
         }
 
-        if (gamepad1.left_bumper)  drivetrain.decreaseSpeed();
-        if (gamepad1.right_bumper) drivetrain.increaseSpeed();
-
-        if (gamepad1.right_stick_button && !lastR3) {
-            drivetrain.resetFieldCentric();
-            gamepad1.rumble(200);
+        // Inject goal tracking turn when active and driver not turning manually
+        if (drivetrain.isGoalTrackingEnabled() && Math.abs(rx) < 0.05) {
+            rx = drivetrain.getGoalTrackingTurn();
         }
-        lastR3 = gamepad1.right_stick_button;
-
-        double speed = drivetrain.getSpeed();
-
-        if (!FIELD_CENTRIC) {
-            // ── ROBOT CENTRIC (active) ──────────────────────────────────────
-            follower.setTeleOpDrive(
-                    forward * speed,
-                    strafe  * speed,
-                    turn    * speed,
-                    true
-            );
-        } else {
-            // ── FIELD CENTRIC (set FIELD_CENTRIC = true to use) ────────────
-            drivetrain.drive(forward, strafe, turn);
-        }
+        follower.setTeleOpDrive(y * speedMultiplier, -x * speedMultiplier, -rx * speedMultiplier, true);
     }
 
     private void handleGP1Alignment() {
         boolean l2 = gamepad1.left_trigger  > 0.5;
         boolean r2 = gamepad1.right_trigger > 0.5;
 
-        if (l2 && !lastL2) {
-            drivetrain.enableGoalTracking(true);  // Limelight
-            gamepad1.rumble(200);
-        }
-        if (r2 && !lastR2) {
-            drivetrain.enableGoalTracking(false); // Odometry
-            gamepad1.rumble(200);
-        }
-        if (!l2 && !r2 && (lastL2 || lastR2)) {
-            drivetrain.disableGoalTracking();
-        }
+        if (l2 && !lastL2) { drivetrain.enableGoalTracking(true);  gamepad1.rumble(200); }
+        if (r2 && !lastR2) { drivetrain.enableGoalTracking(false); gamepad1.rumble(200); }
+        if (!l2 && !r2 && (lastL2 || lastR2)) drivetrain.disableGoalTracking();
 
         lastL2 = l2;
         lastR2 = r2;
@@ -210,7 +245,6 @@ public class NoTurretBlueTeleOp extends OpMode {
         if (gamepad1.cross     && !lastCross)    intake.setMode(Intake.Mode.INTAKE);
         if (gamepad1.square    && !lastSquare)   intake.setMode(Intake.Mode.OFF);
         if (gamepad1.triangle  && !lastTriangle) intake.setMode(Intake.Mode.SPIT);
-
         lastCross    = gamepad1.cross;
         lastSquare   = gamepad1.square;
         lastTriangle = gamepad1.triangle;
@@ -234,33 +268,56 @@ public class NoTurretBlueTeleOp extends OpMode {
     private void handleGP2Positioning() {
         if (gamepad2.dpad_up && !lastGP2DpadUp) {
             autoPos.goToCloseShoot();
+            shooter.setCloseMode();            // auto-set shooter to CLOSE RPM
+            gateCycleActive = false;
             gamepad1.rumble(300); gamepad2.rumble(300);
         }
         lastGP2DpadUp = gamepad2.dpad_up;
 
         if (gamepad2.dpad_down && !lastGP2DpadDown) {
             autoPos.goToFarShoot();
+            shooter.setFarMode();              // auto-set shooter to FAR RPM
+            gateCycleActive = false;
             gamepad1.rumble(300); gamepad2.rumble(300);
         }
         lastGP2DpadDown = gamepad2.dpad_down;
 
         if (gamepad2.dpad_left && !lastGP2DpadLeft) {
             autoPos.goToPark();
+            gateCycleActive = false;
             gamepad1.rumble(300); gamepad2.rumble(300);
         }
         lastGP2DpadLeft = gamepad2.dpad_left;
 
+        if (gamepad2.dpad_right && !lastGP2DpadRight) {
+            autoPos.goToGateCycle();
+            gateCycleActive = true;            // intake stays on during + after gate
+            intake.setMode(Intake.Mode.INTAKE);
+            gamepad1.rumble(300); gamepad2.rumble(300);
+        }
+        lastGP2DpadRight = gamepad2.dpad_right;
+
         if (gamepad2.cross && !lastGP2X) {
             autoPos.cancel();
+            gateCycleActive = false;
             gamepad2.rumbleBlips(2);
         }
         lastGP2X = gamepad2.cross;
+
+        // Keep intake on while gate cycle is running or just finished
+        if (gateCycleActive) {
+            intake.setMode(Intake.Mode.INTAKE);
+        }
     }
 
     private void handleGP2Shooter() {
         if (gamepad2.triangle && !lastGP2Triangle) {
-            if (shooter.getRPMMode() == Shooter.RPMMode.FAR) shooter.setCloseMode();
-            else shooter.setFarMode();
+            if (shooter.getRPMMode() == Shooter.RPMMode.FAR) {
+                shooter.setCloseMode();
+                gamepad2.rumble(300);          // rumble when switching to CLOSE mode
+            } else {
+                shooter.setFarMode();
+            }
             gamepad2.rumbleBlips(1);
         }
         lastGP2Triangle = gamepad2.triangle;
@@ -294,14 +351,17 @@ public class NoTurretBlueTeleOp extends OpMode {
 
     private void displayTelemetry() {
         Pose pose = follower.getPose();
+        double headingDeg = Math.toDegrees(
+                imu.getRobotYawPitchRollAngles().getYaw(AngleUnit.RADIANS) - fieldCentricOffset);
 
         telemetry.addLine("╔═══ NO TURRET BLUE ═══╗");
         telemetry.addData("│ Intake",  intake.getCurrentMode());
-        telemetry.addData("│ Speed",   "%.0f%%", drivetrain.getSpeed() * 100);
+        telemetry.addData("│ Speed",   "%.0f%%", speedMultiplier * 100);
         telemetry.addData("│ Drive",   FIELD_CENTRIC ? "FIELD-CENTRIC" : "ROBOT-CENTRIC");
+        telemetry.addData("│ Heading", "%.1f°  (R3 to reset)", headingDeg);
         telemetry.addData("│ AutoPos", autoPos.isActive() ? "ACTIVE" : "idle");
 
-        telemetry.addLine("╠═══ POSE ═══╣");
+        telemetry.addLine("╠═══ POSE (Odometry) ═══╣");
         telemetry.addData("│ X / Y",   "%.1f, %.1f", pose.getX(), pose.getY());
         telemetry.addData("│ Heading", "%.1f°", Math.toDegrees(pose.getHeading()));
 
@@ -315,10 +375,9 @@ public class NoTurretBlueTeleOp extends OpMode {
         telemetry.addData("│ %s", shooter.getTelemetryString());
 
         telemetry.addLine("╠═══ SWM ═══╣");
-        telemetry.addData("│ Enabled",      swm.isEnabled() ? "YES" : "NO");
-        telemetry.addData("│ Heading Lock", swm.isHeadingLockActive() ? "ACTIVE" : "Off");
-        telemetry.addData("│ Ready",        swm.isReadyToShoot() ? "SHOOT NOW" : "Waiting");
-        telemetry.addData("│ Distance",     "%.1f in", swm.getDistanceForRPM());
+        telemetry.addData("│ Enabled",  swm.isEnabled() ? "YES" : "NO");
+        telemetry.addData("│ Ready",    swm.isReadyToShoot() ? "SHOOT NOW" : "Waiting");
+        telemetry.addData("│ Distance", "%.1f in", swm.getDistanceForRPM());
 
         telemetry.addLine("╚═══════════════════════╝");
         telemetry.update();

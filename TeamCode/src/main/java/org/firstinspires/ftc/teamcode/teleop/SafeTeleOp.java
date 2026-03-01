@@ -13,7 +13,7 @@ import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
 import org.firstinspires.ftc.teamcode.subsystems.Intake;
 import org.firstinspires.ftc.teamcode.subsystems.Shooter;
 
-@TeleOp(name = "SAFE MODE", group = "Safe")
+@TeleOp(name = "SAFE MODE (own field centric rn)", group = "Safe")
 public class SafeTeleOp extends OpMode {
 
     private DcMotor frontLeft, frontRight, backLeft, backRight;
@@ -26,7 +26,7 @@ public class SafeTeleOp extends OpMode {
     private final ElapsedTime runtime = new ElapsedTime();
 
     // Set to true to enable field-centric via IMU
-    private static final boolean FIELD_CENTRIC = false;
+    private static final boolean FIELD_CENTRIC = true;
     private double fieldCentricOffset = 0.0;
 
     private double speedMultiplier   = 0.7;

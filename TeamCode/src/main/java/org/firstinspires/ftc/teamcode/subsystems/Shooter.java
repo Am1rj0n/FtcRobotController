@@ -27,7 +27,7 @@ public class Shooter {
     public static double kP = 0.0001;
     public static double kI = 0.0;
     public static double kD = 0.0;
-    public static double kF = 0.0002;
+    public static double kF = 0.00018;
 
     private static final double RPM_INCREMENT = 50.0;
     private static final double MIN_RPM       = 500.0;
@@ -35,18 +35,14 @@ public class Shooter {
     private static final double TICKS_PER_REV = 28.0;
     private static final double AT_SPEED_TOL  = 100.0;
 
-    private double closeRPM = 2700.0;
-    private double farRPM   = 4000.0;
+    private static final double CLOSE_RPM = 2900.0;
 
-    // Voltage cache - read every 500ms, not every loop
-    private double cachedScalar = 1.0;
-    private final ElapsedTime voltageTimer = new ElapsedTime();
-    private static final double VOLTAGE_CACHE_MS = 500.0;
+    private static final double FAR_RPM   = 3800.0;
 
     private final ElapsedTime loopTimer = new ElapsedTime();
-    private double runMs   = 0;
-    private double readRPM = 0;
-    private double encoderVelocity = 0; // averaged
+    private double runMs           = 0;
+    private double readRPM         = 0;
+    private double encoderVelocity = 0;
 
     public Shooter(HardwareMap hardwareMap) {
         s1 = hardwareMap.get(DcMotorEx.class, "s1");
@@ -65,12 +61,7 @@ public class Shooter {
 
         voltageSensor = hardwareMap.voltageSensor.iterator().next();
         velController = new PIDController(kP, kI, kD);
-
-        // Prime cache
-        cachedScalar = 13.2 / voltageSensor.getVoltage();
-        voltageTimer.reset();
     }
-
 
     public void periodic() {
         loopTimer.reset();
@@ -78,42 +69,31 @@ public class Shooter {
         if (!shooterActive) {
             s1.setPower(0);
             s2.setPower(0);
-            readRPM        = 0;
             encoderVelocity = 0;
-            runMs          = 0;
+            readRPM         = 0;
+            runMs           = 0;
             return;
         }
 
-        // Average both encoders
-
-        //if want to remove one, Just revert periodic() to read only s1:
-        //encoderVelocity = s1.getVelocity();
-        //readRPM = (encoderVelocity * 60.0) / TICKS_PER_REV;
-
-        double vel1 = s1.getVelocity();
-        double vel2 = s2.getVelocity();
-        encoderVelocity = (vel1 + vel2) / 2.0;
+        // Math.abs ensures readRPM is always positive regardless of encoder direction
+        encoderVelocity = Math.abs(s1.getVelocity());
         readRPM         = (encoderVelocity * 60.0) / TICKS_PER_REV;
 
-        // Refresh voltage cache every 500ms
-        if (voltageTimer.milliseconds() > VOLTAGE_CACHE_MS) {
-            cachedScalar = 13.2 / voltageSensor.getVoltage();
-            voltageTimer.reset();
-        }
+        android.util.Log.d("SHOOTER", "raw=" + s1.getVelocity() + " abs=" + encoderVelocity + " rpm=" + readRPM);
 
         double pidOutput   = velController.calculate(readRPM, targetRPM);
         double feedforward = kF * targetRPM;
         double power       = Math.max(-1.0, Math.min(1.0, pidOutput + feedforward));
-        double finalPower  = power * cachedScalar;
+        double scalar      = 13.2 / voltageSensor.getVoltage();
 
-        s1.setPower(finalPower);
-        s2.setPower(finalPower);
+        s1.setPower(power * scalar);
+        s2.setPower(power * scalar);
 
         runMs = loopTimer.milliseconds();
     }
 
     public double getRPMForShot(double meters) {
-        return (227.87 * meters) + 1382.7;
+        return (445.72369 * meters) + 2497.95455;
     }
 
     public void setRPMForDistance(double meters) {
@@ -123,21 +103,20 @@ public class Shooter {
     }
 
     // ==================== MODE SETTERS ====================
-    public void setAutoMode()  { currentRPMMode = RPMMode.AUTO; }
+    public void setAutoMode() { currentRPMMode = RPMMode.AUTO; }
 
     public void setCloseMode() {
         currentRPMMode = RPMMode.CLOSE;
-        targetRPM      = closeRPM;
+        targetRPM      = CLOSE_RPM;
     }
 
     public void setFarMode() {
         currentRPMMode = RPMMode.FAR;
-        targetRPM      = farRPM;
+        targetRPM      = FAR_RPM;
     }
 
     public void setManualFromCurrent() {
         currentRPMMode = RPMMode.MANUAL;
-        // targetRPM already holds current value - just lock the mode
     }
 
     public void toggleMode() {
@@ -151,52 +130,25 @@ public class Shooter {
 
     // ==================== RPM ADJUST ====================
     public void increaseRPM() {
-        switch (currentRPMMode) {
-            case AUTO:
-                currentRPMMode = RPMMode.MANUAL;
-                // fall through - adjust from current auto RPM
-            case MANUAL:
-                targetRPM = Math.min(targetRPM + RPM_INCREMENT, MAX_RPM);
-                break;
-            case CLOSE:
-                closeRPM  = Math.min(closeRPM + RPM_INCREMENT, MAX_RPM);
-                targetRPM = closeRPM;
-                break;
-            case FAR:
-                farRPM    = Math.min(farRPM + RPM_INCREMENT, MAX_RPM);
-                targetRPM = farRPM;
-                break;
-        }
+        currentRPMMode = RPMMode.MANUAL;
+        targetRPM      = Math.min(targetRPM + RPM_INCREMENT, MAX_RPM);
     }
 
     public void decreaseRPM() {
-        switch (currentRPMMode) {
-            case AUTO:
-                currentRPMMode = RPMMode.MANUAL;
-            case MANUAL:
-                targetRPM = Math.max(targetRPM - RPM_INCREMENT, MIN_RPM);
-                break;
-            case CLOSE:
-                closeRPM  = Math.max(closeRPM - RPM_INCREMENT, MIN_RPM);
-                targetRPM = closeRPM;
-                break;
-            case FAR:
-                farRPM    = Math.max(farRPM - RPM_INCREMENT, MIN_RPM);
-                targetRPM = farRPM;
-                break;
-        }
+        currentRPMMode = RPMMode.MANUAL;
+        targetRPM      = Math.max(targetRPM - RPM_INCREMENT, MIN_RPM);
     }
 
     // ==================== ON/OFF ====================
-    public void spin()  { shooterActive = true; }
+    public void spin() { shooterActive = true; }
 
     public void stop() {
         shooterActive = false;
         velController.reset();
         s1.setPower(0);
         s2.setPower(0);
-        readRPM        = 0;
         encoderVelocity = 0;
+        readRPM         = 0;
     }
 
     public void toggle() { if (shooterActive) stop(); else spin(); }
@@ -218,8 +170,8 @@ public class Shooter {
     public double  getEncoderVelocity() { return encoderVelocity; }
     public double  getRunMs()           { return runMs; }
     public RPMMode getRPMMode()         { return currentRPMMode; }
-    public double  getCurrentRPM1()     { return (s1.getVelocity() * 60.0) / TICKS_PER_REV; }
-    public double  getCurrentRPM2()     { return (s2.getVelocity() * 60.0) / TICKS_PER_REV; }
+    public double  getCurrentRPM1()     { return readRPM; }
+    public double  getCurrentRPM2()     { return Math.abs(s2.getVelocity() * 60.0 / TICKS_PER_REV); }
 
     public String getModeName() {
         switch (currentRPMMode) {

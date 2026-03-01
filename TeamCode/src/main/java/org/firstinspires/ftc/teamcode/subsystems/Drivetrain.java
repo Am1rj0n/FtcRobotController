@@ -11,7 +11,7 @@ public class Drivetrain {
     private final Follower follower;
     private final boolean isRed;
 
-    private double driveSpeed = 0.7;
+    private double driveSpeed = 1.0;
     private boolean isHolding = false;
 
     private static final double SPEED_INCREMENT = 0.1;
@@ -34,19 +34,18 @@ public class Drivetrain {
     private static final double GOAL_TRACK_MAX_TURN = 1.0;
     public  static final double GOAL_ALIGN_TOLERANCE = Math.toRadians(1.5);
 
-    private double      lastError  = 0.0;
-    private ElapsedTime pidTimer   = new ElapsedTime();
+    private double      lastError = 0.0;
+    private ElapsedTime pidTimer  = new ElapsedTime();
 
     // Goal positions
     private final Pose GOAL_POSE;
-    private static final double BLUE_GOAL_X = 0.0;
-    private static final double BLUE_GOAL_Y = 144.0;
-    private static final double RED_GOAL_X  = 144.0;
-    private static final double RED_GOAL_Y  = 144.0;
-
+    private static final double BLUE_GOAL_X = 7;
+    private static final double BLUE_GOAL_Y = 141;
+    private static final double RED_GOAL_X  = 134.5; //was 144
+    private static final double RED_GOAL_Y  = 140; //was 130
     // Corner reset positions
-    private static final Pose RED_CORNER  = new Pose(10,  9, Math.toRadians(0));
-    private static final Pose BLUE_CORNER = new Pose(135, 9, Math.toRadians(180));
+    private static final Pose RED_CORNER  = new Pose(119,  130, Math.toRadians(37)); //WAS 10,0
+    private static final Pose BLUE_CORNER = new Pose(27, 129, Math.toRadians(143)); //was 135,9
 
     // Limelight reference for vision-assisted goal tracking
     private Limelight limelight = null;
@@ -64,11 +63,14 @@ public class Drivetrain {
         this.limelight = limelight;
     }
 
+    /**
+     * Field-centric drive using Pedro's odometry heading.
+     * Used when drivetrain.drive() is called directly (not GM0 mode).
+     */
     public void drive(double forward, double strafe, double turn) {
         if (isHolding && (Math.abs(forward) > 0.1 || Math.abs(strafe) > 0.1 || Math.abs(turn) > 0.1)) {
             releaseHold();
         }
-
         if (isHolding) return;
 
         double botHeading = follower.getPose().getHeading() - fieldCentricOffset;
@@ -77,17 +79,12 @@ public class Drivetrain {
         double y    = forward;
         double rotX = x * Math.cos(-botHeading) - y * Math.sin(-botHeading);
         double rotY = x * Math.sin(-botHeading) + y * Math.cos(-botHeading);
-
-        rotX = rotX * 1.1; // counteract imperfect strafing
+        rotX = rotX * 1.1;
 
         rotX *= driveSpeed;
         rotY *= driveSpeed;
         turn *= driveSpeed;
 
-        // Priority order for turn override:
-        // 1. SWM heading lock (highest - moving shot compensation)
-        // 2. Goal tracking PD (drivetrain alignment mode)
-        // 3. Driver manual turn (lowest)
         if (headingLockEnabled) {
             double currentHeading = follower.getPose().getHeading();
             double headingError   = normalizeAngle(lockedHeading - currentHeading);
@@ -95,7 +92,6 @@ public class Drivetrain {
         } else if (goalTrackingEnabled && !hasSignificantTurnInput(turn / driveSpeed)) {
             turn = calculateGoalTrackingTurnPD();
         } else if (goalTrackingEnabled) {
-            // Driver is turning manually - reset PD state
             lastError = 0.0;
             pidTimer.reset();
         }
@@ -103,7 +99,7 @@ public class Drivetrain {
         follower.setTeleOpDrive(rotX, rotY, -turn, false);
     }
 
-    // ========== GOAL TRACKING PD (from v2) ==========
+    // ========== GOAL TRACKING PD ==========
 
     private double calculateGoalTrackingTurnPD() {
         Pose   currentPose    = follower.getPose();
@@ -113,10 +109,8 @@ public class Drivetrain {
         if (visionAssistEnabled && limelight != null) {
             double tx = limelight.getTx();
             if (Math.abs(tx) > 0.5) {
-                // Vision: limelight gives direct angle offset
                 targetHeading = currentHeading + Math.toRadians(tx);
             } else {
-                // Fallback to odometry if no tag
                 targetHeading = Math.atan2(
                         GOAL_POSE.getY() - currentPose.getY(),
                         GOAL_POSE.getX() - currentPose.getX()
@@ -129,18 +123,24 @@ public class Drivetrain {
             );
         }
 
-        double error = normalizeAngle(targetHeading - currentHeading);
-
+        double error      = normalizeAngle(targetHeading - currentHeading);
         double dt         = pidTimer.seconds();
         double derivative = (dt > 0.001) ? (error - lastError) / dt : 0.0;
+        double turn       = (error * GOAL_TRACK_P) + (derivative * GOAL_TRACK_D);
 
-        double turn = (error * GOAL_TRACK_P) + (derivative * GOAL_TRACK_D);
-        turn = Math.max(-GOAL_TRACK_MAX_TURN, Math.min(GOAL_TRACK_MAX_TURN, turn));
-
+        turn      = Math.max(-GOAL_TRACK_MAX_TURN, Math.min(GOAL_TRACK_MAX_TURN, turn));
         lastError = error;
         pidTimer.reset();
 
         return -turn;
+    }
+
+    /**
+     * Public getter so GM0-style TeleOps can inject the PD correction
+     * directly into their own motor math without calling drive().
+     */
+    public double getGoalTrackingTurn() {
+        return calculateGoalTrackingTurnPD();
     }
 
     public boolean isAlignedWithGoal() {
@@ -187,8 +187,8 @@ public class Drivetrain {
         lastError = 0.0;
     }
 
-    public boolean isGoalTrackingEnabled()  { return goalTrackingEnabled; }
-    public boolean isVisionAssistEnabled()  { return visionAssistEnabled; }
+    public boolean isGoalTrackingEnabled() { return goalTrackingEnabled; }
+    public boolean isVisionAssistEnabled() { return visionAssistEnabled; }
 
     // ========== POSITION HOLD ==========
     public void toggleHold() {

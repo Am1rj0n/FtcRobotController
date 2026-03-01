@@ -17,8 +17,8 @@ import org.firstinspires.ftc.teamcode.subsystems.AutoToTeleTransfer;
 import org.firstinspires.ftc.teamcode.pedroPathing.Constants;
 import org.firstinspires.ftc.teamcode.subsystems.*;
 
-@TeleOp(name = "No Turret Red", group = "Competition")
-public class NoTurretRedTeleOp extends OpMode {
+@TeleOp(name = "No Turret TEST red", group = "Competition")
+public class SWMRED extends OpMode {
 
     private static final boolean IS_RED        = true;
     private static final double  TURRET_CENTER = 0.5;
@@ -28,12 +28,39 @@ public class NoTurretRedTeleOp extends OpMode {
     private IMU     imu;
     private double  fieldCentricOffset = 0.0;
 
+    private static final boolean FIELD_CENTRIC  = true;
     private double speedMultiplier = 0.7;
     private static final double MIN_SPEED       = 0.1;
     private static final double MAX_SPEED       = 1.0;
     private static final double SPEED_INCREMENT = 0.1;
 
-    // Pedro used for odometry, autoPos, SWM - NOT for driving
+    // =====================================================================
+    //  SWM HEADING CORRECTION — tune these
+    // =====================================================================
+    /**
+     * P gain for the SWM heading correction loop.
+     * Higher = snappier alignment, too high = oscillation.
+     * Start around 2.0 and tune from there.
+     */
+    private static final double SWM_HEADING_P   = 1.3;
+
+    /**
+     * D gain for the SWM heading correction loop.
+     * Helps damp oscillation during fast rotation.
+     */
+    private static final double SWM_HEADING_D   = 0.05;
+
+    /**
+     * Maximum turn correction SWM can apply (0.0–1.0).
+     * Prevents SWM from spinning the robot uncontrollably.
+     */
+    private static final double SWM_MAX_TURN    = 0.6;
+
+    // SWM PD state
+    private double      swmLastError  = 0.0;
+    private final ElapsedTime swmPidTimer = new ElapsedTime();
+
+    // Pedro / subsystems
     private Drivetrain            drivetrain;
     private Intake                intake;
     private Shooter               shooter;
@@ -45,39 +72,41 @@ public class NoTurretRedTeleOp extends OpMode {
 
     private final ElapsedTime runtime = new ElapsedTime();
 
-    // GP1
+    // GP1 edge detection
     private boolean lastCircle   = false;
     private boolean lastCross    = false;
     private boolean lastSquare   = false;
     private boolean lastTriangle = false;
-    private boolean lastL2       = false;
-    private boolean lastR2       = false;
     private boolean lastL1       = false;
     private boolean lastR1       = false;
+    private boolean lastL2       = false;
+    private boolean lastR2       = false;
     private boolean lastR3       = false;
     private boolean lastTouchpad = false;
     private boolean lastOptions  = false;
 
-    // GP2
-    private boolean lastGP2R2       = false;
-    private boolean lastGP2DpadUp   = false;
-    private boolean lastGP2DpadDown = false;
-    private boolean lastGP2DpadLeft = false;
-    private boolean lastGP2X        = false;
-    private boolean lastGP2Triangle = false;
-    private boolean lastGP2Square   = false;
-    private boolean lastGP2Circle   = false;
-    private boolean lastGP2L1       = false;
-    private boolean lastGP2R1       = false;
-    private boolean lastGP2Share    = false;
+    // GP2 edge detection
+    private boolean lastGP1R2        = false;
+    private boolean lastGP2DpadUp    = false;
+    private boolean lastGP2DpadDown  = false;
+    private boolean lastGP2DpadLeft  = false;
+    private boolean lastGP2X         = false;
+    private boolean lastGP2Triangle  = false;
+    private boolean lastGP2Square    = false;
+    private boolean lastGP2Circle    = false;
+    private boolean lastGP2L1        = false;
+    private boolean lastGP2R1        = false;
+    private boolean lastGP2Share     = false;
     private boolean lastGP2DpadRight = false;
 
-    // Track whether gate cycle is active (intake stays on after completion)
     private boolean gateCycleActive = false;
+
+    // =====================================================================
+    //  LIFECYCLE
+    // =====================================================================
 
     @Override
     public void init() {
-        // GM0 direct motor control
         frontLeft  = hardwareMap.get(DcMotor.class, "front_left_motor");
         frontRight = hardwareMap.get(DcMotor.class, "front_right_motor");
         backLeft   = hardwareMap.get(DcMotor.class, "back_left_motor");
@@ -93,7 +122,6 @@ public class NoTurretRedTeleOp extends OpMode {
         backLeft.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
         backRight.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
 
-        // IMU for field-centric heading
         imu = hardwareMap.get(IMU.class, "imu");
         imu.initialize(new IMU.Parameters(new RevHubOrientationOnRobot(
                 RevHubOrientationOnRobot.LogoFacingDirection.RIGHT,
@@ -101,7 +129,6 @@ public class NoTurretRedTeleOp extends OpMode {
         )));
         imu.resetYaw();
 
-        // Pedro for odometry + autoPos + SWM only
         follower   = Constants.createFollower(hardwareMap);
         limelight  = new Limelight(hardwareMap, IS_RED);
         drivetrain = new Drivetrain(hardwareMap, follower, IS_RED);
@@ -114,8 +141,7 @@ public class NoTurretRedTeleOp extends OpMode {
         turretServo = hardwareMap.servo.get("turret");
         turretServo.setPosition(TURRET_CENTER);
 
-
-        telemetry.addData("Status",    "No Turret Red - Ready");
+        telemetry.addData("Status",    "No Turret Blue - Ready");
         telemetry.addData("Auto Pose", AutoToTeleTransfer.finalPose != null ? "YES" : "NO");
         telemetry.update();
     }
@@ -128,26 +154,26 @@ public class NoTurretRedTeleOp extends OpMode {
         } else {
             follower.setStartingPose(new Pose(72, 8, Math.toRadians(90)));
         }
-
-        // Pedro still needs startTeleopDrive for autoPos path following
         follower.startTeleopDrive();
 
-        // Reset IMU heading on start
         imu.resetYaw();
         fieldCentricOffset = imu.getRobotYawPitchRollAngles().getYaw(AngleUnit.RADIANS);
 
         limelight.start();
         turretServo.setPosition(TURRET_CENTER);
+
+        swmLastError = 0.0;
+        swmPidTimer.reset();
+
         runtime.reset();
     }
 
     @Override
     public void loop() {
-        // Pedro update for odometry tracking only - not driving
         follower.update();
         shooter.periodic();
         autoPos.update();
-        swm.update();
+        swm.update();  // always update so future pose + accel stay fresh
         limelight.updateMegaTag2Orientation(follower);
 
         handleGP1Drive();
@@ -180,42 +206,24 @@ public class NoTurretRedTeleOp extends OpMode {
         backRight.setPower(0);
     }
 
-    // ==================== GP1: DRIVE (GM0 field-centric) ====================
+    // =====================================================================
+    //  DRIVE HANDLING
+    // =====================================================================
+
     private void handleGP1Drive() {
-        // OVERRIDE: any GP1 stick movement always cancels auto-position
-        boolean moving = Math.abs(gamepad1.left_stick_x)  > 0.1
-                || Math.abs(gamepad1.left_stick_y)  > 0.1
-                || Math.abs(gamepad1.right_stick_x) > 0.1;
-        if (moving) {
-            autoPos.cancel();
-            gateCycleActive = false;
+        if (autoPos.isActive()) {
+            boolean moving = Math.abs(gamepad1.left_stick_x)  > 0.1
+                    || Math.abs(gamepad1.left_stick_y)  > 0.1
+                    || Math.abs(gamepad1.right_stick_x) > 0.1;
+            if (moving) {
+                autoPos.cancel();
+            }
         }
 
         double y  = -gamepad1.left_stick_y;
         double x  =  gamepad1.left_stick_x;
         double rx =  gamepad1.right_stick_x;
 
-        // R3 - reset field-centric heading offset
-        if (gamepad1.right_stick_button && !lastR3) {
-            fieldCentricOffset = imu.getRobotYawPitchRollAngles().getYaw(AngleUnit.RADIANS);
-            gamepad1.rumble(200);
-        }
-        lastR3 = gamepad1.right_stick_button;
-
-        // Touchpad - position hold (Pedro holds pose, motors stop)
-        if (gamepad1.touchpad && !lastTouchpad) {
-            drivetrain.toggleHold();
-            if (drivetrain.isHolding()) gamepad1.rumble(500);
-        }
-        lastTouchpad = gamepad1.touchpad;
-
-        // Share - reset odometry to alliance corner
-        if (gamepad1.share) {
-            drivetrain.resetToCorner();
-            gamepad1.rumbleBlips(2);
-        }
-
-        // Speed
         if (gamepad1.left_bumper && !lastL1)
             speedMultiplier = Math.max(MIN_SPEED, speedMultiplier - SPEED_INCREMENT);
         if (gamepad1.right_bumper && !lastR1)
@@ -223,14 +231,82 @@ public class NoTurretRedTeleOp extends OpMode {
         lastL1 = gamepad1.left_bumper;
         lastR1 = gamepad1.right_bumper;
 
-        // Inject goal tracking turn when active and driver not turning manually
-        if (drivetrain.isGoalTrackingEnabled() && Math.abs(rx) < 0.05) {
+        if (gamepad1.right_stick_button && !lastR3) {
+            fieldCentricOffset = imu.getRobotYawPitchRollAngles().getYaw(AngleUnit.RADIANS);
+            gamepad1.rumble(200);
+        }
+        lastR3 = gamepad1.right_stick_button;
+
+        if (gamepad1.touchpad && !lastTouchpad) {
+            drivetrain.toggleHold();
+            if (drivetrain.isHolding()) gamepad1.rumble(500);
+        }
+        lastTouchpad = gamepad1.touchpad;
+
+        if (gamepad1.share) {
+            drivetrain.resetToCorner();
+            gamepad1.rumbleBlips(2);
+        }
+
+        boolean driverTurning = Math.abs(rx) > 0.05;
+
+        // ── Turn correction priority ──────────────────────────────────────
+        // 1. Driver is manually turning → honour it directly, reset SWM PD
+        // 2. SWM is enabled → apply SWM future-pose heading PD correction
+        // 3. Odom goal tracking is enabled → apply drivetrain goal-tracking PD
+        // 4. Nothing → pass rx through as-is (0 if stick is neutral)
+        // ─────────────────────────────────────────────────────────────────
+        if (driverTurning) {
+            // Driver has the wheel — reset integrators so we don't get a
+            // jump when they release the stick
+            swmLastError = 0.0;
+            swmPidTimer.reset();
+            // rx already set from stick, fall through to setTeleOpDrive
+        } else if (swm.isEnabled() && swm.isHeadingLockActive()) {
+            rx = calculateSWMTurnCorrection();
+        } else if (drivetrain.isGoalTrackingEnabled()) {
             rx = drivetrain.getGoalTrackingTurn();
         }
+        // else rx stays as-is (0.0 from neutral stick)
+
         follower.setTeleOpDrive(y * speedMultiplier, -x * speedMultiplier, -rx * speedMultiplier, true);
     }
 
-    // ==================== GP1: ALIGNMENT ====================
+    /**
+     * PD controller that steers the drivetrain toward the SWM target heading
+     * (heading aimed at future predicted goal intersection, not current pose).
+     *
+     * Returns a turn value in [-1, 1] ready to feed into setTeleOpDrive.
+     */
+    private double calculateSWMTurnCorrection() {
+        double currentHeading = follower.getPose().getHeading();
+        double targetHeading  = swm.getTargetHeading();
+        double error          = normalizeAngle(targetHeading - currentHeading);
+
+        double dt         = swmPidTimer.seconds();
+        double derivative = (dt > 0.001) ? (error - swmLastError) / dt : 0.0;
+
+        double turn = (error * SWM_HEADING_P) + (derivative * SWM_HEADING_D);
+        turn = Math.max(-SWM_MAX_TURN, Math.min(SWM_MAX_TURN, turn));
+
+        swmLastError = error;
+        swmPidTimer.reset();
+
+        // Negate: Pedro setTeleOpDrive convention — positive rx = CCW,
+        // our error is CCW-positive, so we negate to get CW correction.
+        return -turn;
+    }
+
+    private double normalizeAngle(double angle) {
+        while (angle >  Math.PI) angle -= 2 * Math.PI;
+        while (angle < -Math.PI) angle += 2 * Math.PI;
+        return angle;
+    }
+
+    // =====================================================================
+    //  OTHER HANDLERS (unchanged logic, same as before)
+    // =====================================================================
+
     private void handleGP1Alignment() {
         boolean l2 = gamepad1.left_trigger  > 0.5;
         boolean r2 = gamepad1.right_trigger > 0.5;
@@ -255,7 +331,6 @@ public class NoTurretRedTeleOp extends OpMode {
         if (gamepad1.cross     && !lastCross)    intake.setMode(Intake.Mode.INTAKE);
         if (gamepad1.square    && !lastSquare)   intake.setMode(Intake.Mode.OFF);
         if (gamepad1.triangle  && !lastTriangle) intake.setMode(Intake.Mode.SPIT);
-
         lastCross    = gamepad1.cross;
         lastSquare   = gamepad1.square;
         lastTriangle = gamepad1.triangle;
@@ -264,22 +339,25 @@ public class NoTurretRedTeleOp extends OpMode {
     private void handleGP1SWM() {
         if (gamepad1.options && !lastOptions) {
             swm.toggle();
+            // Reset PD state on toggle so there's no heading error spike
+            swmLastError = 0.0;
+            swmPidTimer.reset();
             gamepad1.rumble(swm.isEnabled() ? 500 : 200);
         }
         lastOptions = gamepad1.options;
     }
 
     private void handleGP2Shoot() {
-        boolean r2 = gamepad2.right_trigger > 0.5;
-        if (r2  && !lastGP2R2) intake.setMode(Intake.Mode.SHOOT);
-        if (!r2 &&  lastGP2R2) intake.setMode(Intake.Mode.OFF);
-        lastGP2R2 = r2;
+        boolean r2 = gamepad1.right_trigger > 0.5;
+        if (r2  && !lastGP1R2) intake.setMode(Intake.Mode.SHOOT);
+        if (!r2 &&  lastGP1R2) intake.setMode(Intake.Mode.OFF);
+        lastGP1R2 = r2;
     }
 
     private void handleGP2Positioning() {
         if (gamepad2.dpad_up && !lastGP2DpadUp) {
             autoPos.goToCloseShoot();
-            shooter.setCloseMode();            // auto-set shooter to CLOSE RPM
+            shooter.setCloseMode();
             gateCycleActive = false;
             gamepad1.rumble(300); gamepad2.rumble(300);
         }
@@ -287,7 +365,7 @@ public class NoTurretRedTeleOp extends OpMode {
 
         if (gamepad2.dpad_down && !lastGP2DpadDown) {
             autoPos.goToFarShoot();
-            shooter.setFarMode();              // auto-set shooter to FAR RPM
+            shooter.setFarMode();
             gateCycleActive = false;
             gamepad1.rumble(300); gamepad2.rumble(300);
         }
@@ -302,7 +380,7 @@ public class NoTurretRedTeleOp extends OpMode {
 
         if (gamepad2.dpad_right && !lastGP2DpadRight) {
             autoPos.goToGateCycle();
-            gateCycleActive = true;            // intake stays on during + after gate
+            gateCycleActive = true;
             intake.setMode(Intake.Mode.INTAKE);
             gamepad1.rumble(300); gamepad2.rumble(300);
         }
@@ -315,7 +393,6 @@ public class NoTurretRedTeleOp extends OpMode {
         }
         lastGP2X = gamepad2.cross;
 
-        // Keep intake on while gate cycle is running or just finished
         if (gateCycleActive) {
             intake.setMode(Intake.Mode.INTAKE);
         }
@@ -323,12 +400,8 @@ public class NoTurretRedTeleOp extends OpMode {
 
     private void handleGP2Shooter() {
         if (gamepad2.triangle && !lastGP2Triangle) {
-            if (shooter.getRPMMode() == Shooter.RPMMode.FAR) {
-                shooter.setCloseMode();
-                gamepad2.rumble(300);          // rumble when switching to CLOSE mode
-            } else {
-                shooter.setFarMode();
-            }
+            if (shooter.getRPMMode() == Shooter.RPMMode.FAR) shooter.setCloseMode();
+            else shooter.setFarMode();
             gamepad2.rumbleBlips(1);
         }
         lastGP2Triangle = gamepad2.triangle;
@@ -360,15 +433,20 @@ public class NoTurretRedTeleOp extends OpMode {
         lastGP2Share = gamepad2.share;
     }
 
-    private void displayTelemetry() {
-        Pose pose = follower.getPose();
-        double headingDeg = Math.toDegrees(
-                imu.getRobotYawPitchRollAngles().getYaw(AngleUnit.RADIANS) - fieldCentricOffset
-        );
+    // =====================================================================
+    //  TELEMETRY
+    // =====================================================================
 
-        telemetry.addLine("╔═══ NO TURRET RED ═══╗");
+    private void displayTelemetry() {
+        Pose   pose       = follower.getPose();
+        Pose   futurePose = swm.getFuturePose();
+        double headingDeg = Math.toDegrees(
+                imu.getRobotYawPitchRollAngles().getYaw(AngleUnit.RADIANS) - fieldCentricOffset);
+
+        telemetry.addLine("╔═══ NO TURRET BLUE ═══╗");
         telemetry.addData("│ Intake",  intake.getCurrentMode());
         telemetry.addData("│ Speed",   "%.0f%%", speedMultiplier * 100);
+        telemetry.addData("│ Drive",   FIELD_CENTRIC ? "FIELD-CENTRIC" : "ROBOT-CENTRIC");
         telemetry.addData("│ Heading", "%.1f°  (R3 to reset)", headingDeg);
         telemetry.addData("│ AutoPos", autoPos.isActive() ? "ACTIVE" : "idle");
 
@@ -386,9 +464,16 @@ public class NoTurretRedTeleOp extends OpMode {
         telemetry.addData("│ %s", shooter.getTelemetryString());
 
         telemetry.addLine("╠═══ SWM ═══╣");
-        telemetry.addData("│ Enabled",  swm.isEnabled() ? "YES" : "NO");
-        telemetry.addData("│ Ready",    swm.isReadyToShoot() ? "SHOOT NOW" : "Waiting");
-        telemetry.addData("│ Distance", "%.1f in", swm.getDistanceForRPM());
+        telemetry.addData("│ Enabled",       swm.isEnabled() ? "YES" : "NO");
+        telemetry.addData("│ Heading Lock",  swm.isHeadingLockActive() ? "ACTIVE" : "waiting");
+        telemetry.addData("│ Ready",         swm.isReadyToShoot() ? "SHOOT NOW ✓" : "Waiting");
+        telemetry.addData("│ Distance",      "%.1f in", swm.getDistanceForRPM());
+        telemetry.addData("│ Target Hdg",    "%.1f°", Math.toDegrees(swm.getTargetHeading()));
+        telemetry.addData("│ Future X/Y",    "%.1f, %.1f", futurePose.getX(), futurePose.getY());
+        telemetry.addData("│ Heading Err",   "%.2f°", Math.toDegrees(
+                normalizeAngle(swm.getTargetHeading() - pose.getHeading())));
+        telemetry.addData("│ Velocity",      "%.1f in/s", swm.getVelocityMagnitude());
+        telemetry.addData("│ Accel X/Y",     "%.1f, %.1f", swm.getAccelX(), swm.getAccelY());
 
         telemetry.addLine("╚═══════════════════════╝");
         telemetry.update();

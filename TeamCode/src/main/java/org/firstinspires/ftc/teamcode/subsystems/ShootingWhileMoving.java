@@ -14,7 +14,7 @@ public class ShootingWhileMoving {
     private final boolean  isRed;
 
     // ==================== TUNING ====================
-    private static final double FLIGHT_TIME_SECONDS = 0.5;
+    private static final double FLIGHT_TIME_SECONDS = 1;
 
     // ==================== GOAL POSITIONS ====================
     private static final double BLUE_GOAL_X = 0.0;

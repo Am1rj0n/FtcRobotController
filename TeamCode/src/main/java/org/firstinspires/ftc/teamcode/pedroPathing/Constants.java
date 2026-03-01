@@ -18,15 +18,15 @@ public class Constants {
 
     public static FollowerConstants followerConstants = new FollowerConstants()
             .mass(10.9)
-        .forwardZeroPowerAcceleration(-29.1309918467)
-            .lateralZeroPowerAcceleration(-77.65507688407813)
+        .forwardZeroPowerAcceleration(-41.6225999)
+            .lateralZeroPowerAcceleration(-78.5697)
 
 
            .translationalPIDFCoefficients(new PIDFCoefficients(
-                   0.15,
+                   0.12,
                     0.0001,
                     0.02,
-                    0.12
+                    0.07
             ))
             .translationalPIDFSwitch(3)
             .headingPIDFCoefficients(new PIDFCoefficients(
@@ -36,10 +36,14 @@ public class Constants {
                      0.03
              ))
             .headingPIDFSwitch(0.1)
+
+            //tune drive
+
+            //increase P until oscillatin, then increase D to get rid = agressive movement
              .drivePIDFCoefficients(new FilteredPIDFCoefficients(
                      0.15,
                      0,
-                     0.0005,
+                     0.0007,
                      0.7,
                      0.02
              ))
@@ -61,8 +65,8 @@ public class Constants {
 
 
 
-            .xVelocity(62.46352837029404)
-            .yVelocity(49.594572773129926);
+            .xVelocity(73.7451167)
+            .yVelocity(54.4023495);
 
     public static PinpointConstants localizerConstants = new PinpointConstants()
 
@@ -72,12 +76,12 @@ public class Constants {
             .strafeEncoderDirection(GoBildaPinpointDriver.EncoderDirection.FORWARD);
 
     public static PathConstraints pathConstraints = new PathConstraints(
-            0.995,
             1.0,
+            0.95,
             1.0,
             0.030,
             50,
-            1.0,
+            1.67,
             10,
             2
     );
