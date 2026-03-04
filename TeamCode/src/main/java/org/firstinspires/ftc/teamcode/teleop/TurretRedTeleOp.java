@@ -6,7 +6,6 @@ import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DcMotorSimple;
 import com.qualcomm.robotcore.hardware.IMU;
-import com.qualcomm.robotcore.hardware.Servo;
 import com.qualcomm.robotcore.util.ElapsedTime;
 import com.pedropathing.follower.Follower;
 import com.pedropathing.geometry.Pose;
@@ -17,62 +16,91 @@ import org.firstinspires.ftc.teamcode.subsystems.AutoToTeleTransfer;
 import org.firstinspires.ftc.teamcode.pedroPathing.Constants;
 import org.firstinspires.ftc.teamcode.subsystems.*;
 
-@TeleOp(name = "No Turret TEST red", group = "Competition")
-public class SWMRED extends OpMode {
+@TeleOp(name = "Turret Red", group = "Competition")
+public class TurretRedTeleOp extends OpMode {
 
-    private static final boolean IS_RED        = true;
-    private static final double  TURRET_CENTER = 0.5;
+    private static final boolean IS_RED = true;
 
-    // GM0 field-centric - direct motor control
+    // =========================================================================
+    //  TURRET CONSTANTS  — change MAX_ANGLE here to adjust range anytime
+    // =========================================================================
+    /**
+     * Physical range of the turret servo in degrees.
+     * ±50 means the servo can reach 50° left and 50° right of center.
+     * Formula: servoPos = 0.5 + (angleDeg / MAX_TURRET_ANGLE) * 0.5
+     * Change this one number to adjust the full range.
+     */
+    private static final double TURRET_MAX_ANGLE        = 50.0;   // degrees — tune for your servo
+    private static final double TURRET_CENTER_POS       = 0.5;    // servo center position
+    private static final double TURRET_ALIGN_TOLERANCE  = 2.0;    // degrees — "aligned" threshold
+
+    /**
+     * P gain for turret odom tracking PD loop.
+     * Higher = snappier, too high = jitter/oscillation on the servo.
+     */
+    private static final double TURRET_P                = 0.012;  // servo units per degree error
+    private static final double TURRET_D                = 0.001;  // derivative damping
+
+    // Goal positions (inches) — same as SWM and Turret subsystem
+    private static final double GOAL_X = IS_RED ? 144.0 : 0.0;
+    private static final double GOAL_Y = 144.0;
+
+    // =========================================================================
+    //  DRIVETRAIN / FIELD-CENTRIC
+    // =========================================================================
     private DcMotor frontLeft, frontRight, backLeft, backRight;
     private IMU     imu;
     private double  fieldCentricOffset = 0.0;
 
     private static final boolean FIELD_CENTRIC  = true;
-    private double speedMultiplier = 0.7;
+    private double speedMultiplier              = 0.7;
     private static final double MIN_SPEED       = 0.1;
     private static final double MAX_SPEED       = 1.0;
     private static final double SPEED_INCREMENT = 0.1;
 
-    // =====================================================================
-    //  SWM HEADING CORRECTION — tune these
-    // =====================================================================
-    /**
-     * P gain for the SWM heading correction loop.
-     * Higher = snappier alignment, too high = oscillation.
-     * Start around 2.0 and tune from there.
-     */
-    private static final double SWM_HEADING_P   = 1.3;
-
-    /**
-     * D gain for the SWM heading correction loop.
-     * Helps damp oscillation during fast rotation.
-     */
+    // =========================================================================
+    //  SWM HEADING CORRECTION (drivetrain) — same as NoTurretRedTeleOp
+    // =========================================================================
+    private static final double SWM_HEADING_P   = 2.0;
     private static final double SWM_HEADING_D   = 0.05;
-
-    /**
-     * Maximum turn correction SWM can apply (0.0–1.0).
-     * Prevents SWM from spinning the robot uncontrollably.
-     */
     private static final double SWM_MAX_TURN    = 0.6;
+    private double              swmLastError    = 0.0;
+    private final ElapsedTime   swmPidTimer     = new ElapsedTime();
 
-    // SWM PD state
-    private double      swmLastError  = 0.0;
-    private final ElapsedTime swmPidTimer = new ElapsedTime();
-
-    // Pedro / subsystems
+    // =========================================================================
+    //  SUBSYSTEMS
+    // =========================================================================
     private Drivetrain            drivetrain;
     private Intake                intake;
     private Shooter               shooter;
     private Limelight             limelight;
     private ShootingWhileMoving   swm;
     private AutoPositionSubsystem autoPos;
-    private Servo                 turretServo;
+    private Turret                turret;
     private Follower              follower;
 
     private final ElapsedTime runtime = new ElapsedTime();
 
-    // GP1 edge detection
+    // =========================================================================
+    //  TURRET STATE
+    // =========================================================================
+    /**
+     * When true, turret tracks the goal via odometry PD loop (GP2 L2 toggle).
+     * When false, turret holds TURRET_CENTER_POS (center).
+     */
+    private boolean turretOdomTracking = false;
+
+    // PD state for turret odom tracking
+    private double            turretLastError = 0.0;
+    private final ElapsedTime turretPidTimer  = new ElapsedTime();
+
+    // Current commanded servo position — always write through this so we
+    // never have multiple places fighting over the servo.
+    private double turretServoPos = TURRET_CENTER_POS;
+
+    // =========================================================================
+    //  GP1 EDGE DETECTION
+    // =========================================================================
     private boolean lastCircle   = false;
     private boolean lastCross    = false;
     private boolean lastSquare   = false;
@@ -85,11 +113,15 @@ public class SWMRED extends OpMode {
     private boolean lastTouchpad = false;
     private boolean lastOptions  = false;
 
-    // GP2 edge detection
-    private boolean lastGP1R2        = false;
+    // =========================================================================
+    //  GP2 EDGE DETECTION
+    // =========================================================================
+    private boolean lastGP2L2        = false;   // turret odom tracking toggle
+    private boolean lastGP2R2        = false;
     private boolean lastGP2DpadUp    = false;
     private boolean lastGP2DpadDown  = false;
     private boolean lastGP2DpadLeft  = false;
+    private boolean lastGP2DpadRight = false;
     private boolean lastGP2X         = false;
     private boolean lastGP2Triangle  = false;
     private boolean lastGP2Square    = false;
@@ -97,13 +129,12 @@ public class SWMRED extends OpMode {
     private boolean lastGP2L1        = false;
     private boolean lastGP2R1        = false;
     private boolean lastGP2Share     = false;
-    private boolean lastGP2DpadRight = false;
 
     private boolean gateCycleActive = false;
 
-    // =====================================================================
+    // =========================================================================
     //  LIFECYCLE
-    // =====================================================================
+    // =========================================================================
 
     @Override
     public void init() {
@@ -135,13 +166,11 @@ public class SWMRED extends OpMode {
         drivetrain.setLimelight(limelight);
         intake     = new Intake(hardwareMap);
         shooter    = new Shooter(hardwareMap);
-        swm        = new ShootingWhileMoving(follower, shooter, null, IS_RED);
+        turret     = new Turret(hardwareMap, limelight, IS_RED);
+        swm        = new ShootingWhileMoving(follower, shooter, turret, IS_RED);
         autoPos    = new AutoPositionSubsystem(follower, IS_RED);
 
-        turretServo = hardwareMap.servo.get("turret");
-        turretServo.setPosition(TURRET_CENTER);
-
-        telemetry.addData("Status",    "No Turret Blue - Ready");
+        telemetry.addData("Status",    "Turret Red - Ready");
         telemetry.addData("Auto Pose", AutoToTeleTransfer.finalPose != null ? "YES" : "NO");
         telemetry.update();
     }
@@ -160,7 +189,11 @@ public class SWMRED extends OpMode {
         fieldCentricOffset = imu.getRobotYawPitchRollAngles().getYaw(AngleUnit.RADIANS);
 
         limelight.start();
-        turretServo.setPosition(TURRET_CENTER);
+
+        turretServoPos      = TURRET_CENTER_POS;
+        turretOdomTracking  = false;
+        turretLastError     = 0.0;
+        turretPidTimer.reset();
 
         swmLastError = 0.0;
         swmPidTimer.reset();
@@ -173,24 +206,34 @@ public class SWMRED extends OpMode {
         follower.update();
         shooter.periodic();
         autoPos.update();
-        swm.update();  // always update so future pose + accel stay fresh
+        swm.update();
         limelight.updateMegaTag2Orientation(follower);
+
+        // Update turret subsystem (needed for isAligned() / SWM integration)
+        turret.update(follower.getPose());
 
         handleGP1Drive();
         handleGP1Alignment();
         handleGP1Shooter();
         handleGP1Intake();
         handleGP1SWM();
+
+        handleGP2TurretTracking();   // NEW — L2 toggle
         handleGP2Shoot();
         handleGP2Positioning();
         handleGP2Shooter();
         handleGP2Localization();
 
+        // Auto RPM based on distance (future pose if SWM on)
         if (shooter.isActive()) {
             shooter.setRPMForDistance(swm.getDistanceForRPM() * 0.0254);
         }
 
-        turretServo.setPosition(TURRET_CENTER);
+        // Turret output — one write per loop, priority:
+        //   1. Odom tracking active → PD servo output
+        //   2. Tracking off → center
+        applyTurretOutput();
+
         displayTelemetry();
     }
 
@@ -206,18 +249,129 @@ public class SWMRED extends OpMode {
         backRight.setPower(0);
     }
 
-    // =====================================================================
-    //  DRIVE HANDLING
-    // =====================================================================
+    // =========================================================================
+    //  TURRET OUTPUT
+    // =========================================================================
+
+    /**
+     * Computes and writes the final servo position every loop.
+     *
+     * When odom tracking is ON:
+     *   1. Compute global angle from robot to goal using atan2.
+     *   2. Subtract robot heading to get robot-relative turret angle.
+     *   3. Clamp to ±TURRET_MAX_ANGLE.
+     *   4. Run a PD loop to smooth the servo motion.
+     *   5. Map angle to [0,1] servo position.
+     *
+     * When odom tracking is OFF: hold center (TURRET_CENTER_POS).
+     *
+     * To change the turret range later:  change TURRET_MAX_ANGLE.
+     * To change tracking aggression:     change TURRET_P / TURRET_D.
+     * To change alignment sensitivity:   change TURRET_ALIGN_TOLERANCE.
+     */
+    private void applyTurretOutput() {
+        if (turretOdomTracking) {
+            turretServoPos = calculateTurretOdomPosition();
+        } else {
+            turretServoPos = TURRET_CENTER_POS;
+            turretLastError = 0.0;  // reset so there's no jump when re-enabling
+            turretPidTimer.reset();
+        }
+
+        // Clamp to valid servo range
+        turretServoPos = Math.max(0.0, Math.min(1.0, turretServoPos));
+
+        // Write to the turret subsystem's servo via the existing setServoAngle path.
+        // We bypass Turret.update() output and write the servo directly here so
+        // the teleop has full priority. Alternatively, call turret.setMode(MANUAL)
+        // and turret.setManualAngle() if you prefer routing through the subsystem.
+        //
+        // Direct approach (simplest):
+        turret.setManualAngle(servoPositionToAngle(turretServoPos));
+        turret.setMode(turretOdomTracking ? Turret.Mode.ODOMETRY : Turret.Mode.MANUAL);
+    }
+
+    /**
+     * PD controller: computes target servo position using odometry.
+     *
+     * Error = desired turret angle (robot-relative) - current turret angle.
+     * Output is clamped so the servo can't slam to an extreme in one loop.
+     */
+    private double calculateTurretOdomPosition() {
+        Pose pose = follower.getPose();
+
+        // Step 1: global angle from robot to goal
+        double dx = GOAL_X - pose.getX();
+        double dy = GOAL_Y - pose.getY();
+        double globalAngleToGoal = Math.toDegrees(Math.atan2(dy, dx));
+
+        // Step 2: robot-relative angle = global angle minus robot heading
+        double robotHeading = Math.toDegrees(pose.getHeading());
+        double desiredTurretAngle = globalAngleToGoal - robotHeading;
+
+        // Normalize to ±180
+        while (desiredTurretAngle >  180) desiredTurretAngle -= 360;
+        while (desiredTurretAngle < -180) desiredTurretAngle += 360;
+
+        // Clamp to physical range
+        desiredTurretAngle = Math.max(-TURRET_MAX_ANGLE, Math.min(TURRET_MAX_ANGLE, desiredTurretAngle));
+
+        // Step 3: current servo angle (back-calculate from position)
+        double currentAngle = servoPositionToAngle(turretServoPos);
+
+        // Step 4: PD
+        double error      = desiredTurretAngle - currentAngle;
+        double dt         = turretPidTimer.seconds();
+        double derivative = (dt > 0.001) ? (error - turretLastError) / dt : 0.0;
+        double output     = (error * TURRET_P) + (derivative * TURRET_D);
+
+        turretLastError = error;
+        turretPidTimer.reset();
+
+        // Step 5: apply output to current position (incremental PD)
+        return turretServoPos + output;
+    }
+
+    /**
+     * Convert servo position [0,1] back to angle in degrees.
+     * Inverse of: pos = 0.5 + (angle / MAX) * 0.5
+     */
+    private double servoPositionToAngle(double pos) {
+        return (pos - TURRET_CENTER_POS) / 0.5 * TURRET_MAX_ANGLE;
+    }
+
+    /**
+     * Convert angle in degrees to servo position [0,1].
+     */
+    private double angleToDegServoPos(double angleDeg) {
+        return TURRET_CENTER_POS + (angleDeg / TURRET_MAX_ANGLE) * 0.5;
+    }
+
+    /** True if turret is within TURRET_ALIGN_TOLERANCE of desired angle. */
+    private boolean isTurretAligned() {
+        if (!turretOdomTracking) return false;
+        Pose   pose              = follower.getPose();
+        double dx                = GOAL_X - pose.getX();
+        double dy                = GOAL_Y - pose.getY();
+        double globalAngle       = Math.toDegrees(Math.atan2(dy, dx));
+        double desiredAngle      = globalAngle - Math.toDegrees(pose.getHeading());
+        while (desiredAngle >  180) desiredAngle -= 360;
+        while (desiredAngle < -180) desiredAngle += 360;
+        desiredAngle = Math.max(-TURRET_MAX_ANGLE, Math.min(TURRET_MAX_ANGLE, desiredAngle));
+        double currentAngle = servoPositionToAngle(turretServoPos);
+        return Math.abs(desiredAngle - currentAngle) < TURRET_ALIGN_TOLERANCE;
+    }
+
+    // =========================================================================
+    //  DRIVE HANDLING — same as NoTurretRedTeleOp
+    // =========================================================================
 
     private void handleGP1Drive() {
         if (autoPos.isActive()) {
             boolean moving = Math.abs(gamepad1.left_stick_x)  > 0.1
                     || Math.abs(gamepad1.left_stick_y)  > 0.1
                     || Math.abs(gamepad1.right_stick_x) > 0.1;
-            if (moving) {
-                autoPos.cancel();
-            }
+            if (moving) autoPos.cancel();
         }
 
         double y  = -gamepad1.left_stick_y;
@@ -250,34 +404,23 @@ public class SWMRED extends OpMode {
 
         boolean driverTurning = Math.abs(rx) > 0.05;
 
-        // ── Turn correction priority ──────────────────────────────────────
-        // 1. Driver is manually turning → honour it directly, reset SWM PD
-        // 2. SWM is enabled → apply SWM future-pose heading PD correction
-        // 3. Odom goal tracking is enabled → apply drivetrain goal-tracking PD
-        // 4. Nothing → pass rx through as-is (0 if stick is neutral)
-        // ─────────────────────────────────────────────────────────────────
+        // Turn priority (same as NoTurretRedTeleOp):
+        // 1. Driver manually turning → honour directly, reset SWM PD
+        // 2. SWM enabled → SWM future-pose PD correction
+        // 3. Drivetrain goal tracking → existing drivetrain PD
+        // 4. None → rx = 0
         if (driverTurning) {
-            // Driver has the wheel — reset integrators so we don't get a
-            // jump when they release the stick
             swmLastError = 0.0;
             swmPidTimer.reset();
-            // rx already set from stick, fall through to setTeleOpDrive
         } else if (swm.isEnabled() && swm.isHeadingLockActive()) {
             rx = calculateSWMTurnCorrection();
         } else if (drivetrain.isGoalTrackingEnabled()) {
             rx = drivetrain.getGoalTrackingTurn();
         }
-        // else rx stays as-is (0.0 from neutral stick)
 
         follower.setTeleOpDrive(y * speedMultiplier, -x * speedMultiplier, -rx * speedMultiplier, true);
     }
 
-    /**
-     * PD controller that steers the drivetrain toward the SWM target heading
-     * (heading aimed at future predicted goal intersection, not current pose).
-     *
-     * Returns a turn value in [-1, 1] ready to feed into setTeleOpDrive.
-     */
     private double calculateSWMTurnCorrection() {
         double currentHeading = follower.getPose().getHeading();
         double targetHeading  = swm.getTargetHeading();
@@ -291,9 +434,6 @@ public class SWMRED extends OpMode {
 
         swmLastError = error;
         swmPidTimer.reset();
-
-        // Negate: Pedro setTeleOpDrive convention — positive rx = CCW,
-        // our error is CCW-positive, so we negate to get CW correction.
         return -turn;
     }
 
@@ -303,9 +443,9 @@ public class SWMRED extends OpMode {
         return angle;
     }
 
-    // =====================================================================
-    //  OTHER HANDLERS (unchanged logic, same as before)
-    // =====================================================================
+    // =========================================================================
+    //  GP1 HANDLERS — identical to NoTurretRedTeleOp
+    // =========================================================================
 
     private void handleGP1Alignment() {
         boolean l2 = gamepad1.left_trigger  > 0.5;
@@ -339,7 +479,6 @@ public class SWMRED extends OpMode {
     private void handleGP1SWM() {
         if (gamepad1.options && !lastOptions) {
             swm.toggle();
-            // Reset PD state on toggle so there's no heading error spike
             swmLastError = 0.0;
             swmPidTimer.reset();
             gamepad1.rumble(swm.isEnabled() ? 500 : 200);
@@ -347,11 +486,42 @@ public class SWMRED extends OpMode {
         lastOptions = gamepad1.options;
     }
 
+    // =========================================================================
+    //  GP2 HANDLERS
+    // =========================================================================
+
+    /**
+     * GP2 L2 — Toggle turret odom tracking.
+     *
+     * First press:  turret starts tracking the goal using odometry PD.
+     * Second press: turret returns to center (TURRET_CENTER_POS) and holds.
+     *
+     * This is exactly like the drivetrain goal tracking, but for the servo.
+     * The turret doesn't fight the driver — it's a toggle, not hold-to-track.
+     */
+    private void handleGP2TurretTracking() {
+        boolean l2 = gamepad2.left_trigger > 0.5;
+
+        if (l2 && !lastGP2L2) {
+            turretOdomTracking = !turretOdomTracking;
+            turretLastError    = 0.0;
+            turretPidTimer.reset();
+
+            if (turretOdomTracking) {
+                gamepad2.rumble(500);   // long buzz = tracking ON
+            } else {
+                turretServoPos = TURRET_CENTER_POS;  // snap back to center
+                gamepad2.rumble(200);                // short buzz = tracking OFF / centered
+            }
+        }
+        lastGP2L2 = l2;
+    }
+
     private void handleGP2Shoot() {
-        boolean r2 = gamepad1.right_trigger > 0.5;
-        if (r2  && !lastGP1R2) intake.setMode(Intake.Mode.SHOOT);
-        if (!r2 &&  lastGP1R2) intake.setMode(Intake.Mode.OFF);
-        lastGP1R2 = r2;
+        boolean r2 = gamepad2.right_trigger > 0.5;
+        if (r2  && !lastGP2R2) intake.setMode(Intake.Mode.SHOOT);
+        if (!r2 &&  lastGP2R2) intake.setMode(Intake.Mode.OFF);
+        lastGP2R2 = r2;
     }
 
     private void handleGP2Positioning() {
@@ -393,9 +563,7 @@ public class SWMRED extends OpMode {
         }
         lastGP2X = gamepad2.cross;
 
-        if (gateCycleActive) {
-            intake.setMode(Intake.Mode.INTAKE);
-        }
+        if (gateCycleActive) intake.setMode(Intake.Mode.INTAKE);
     }
 
     private void handleGP2Shooter() {
@@ -433,28 +601,35 @@ public class SWMRED extends OpMode {
         lastGP2Share = gamepad2.share;
     }
 
-    // =====================================================================
+    // =========================================================================
     //  TELEMETRY
-    // =====================================================================
+    // =========================================================================
 
     private void displayTelemetry() {
         Pose   pose       = follower.getPose();
         Pose   futurePose = swm.getFuturePose();
         double headingDeg = Math.toDegrees(
                 imu.getRobotYawPitchRollAngles().getYaw(AngleUnit.RADIANS) - fieldCentricOffset);
+        double currentTurretAngle = servoPositionToAngle(turretServoPos);
 
-        telemetry.addLine("╔═══ NO TURRET BLUE ═══╗");
+        telemetry.addLine("╔═══ TURRET RED ═══╗");
         telemetry.addData("│ Intake",  intake.getCurrentMode());
         telemetry.addData("│ Speed",   "%.0f%%", speedMultiplier * 100);
-        telemetry.addData("│ Drive",   FIELD_CENTRIC ? "FIELD-CENTRIC" : "ROBOT-CENTRIC");
         telemetry.addData("│ Heading", "%.1f°  (R3 to reset)", headingDeg);
         telemetry.addData("│ AutoPos", autoPos.isActive() ? "ACTIVE" : "idle");
 
-        telemetry.addLine("╠═══ POSE (Odometry) ═══╣");
+        telemetry.addLine("╠═══ POSE ═══╣");
         telemetry.addData("│ X / Y",   "%.1f, %.1f", pose.getX(), pose.getY());
         telemetry.addData("│ Heading", "%.1f°", Math.toDegrees(pose.getHeading()));
 
-        telemetry.addLine("╠═══ ALIGNMENT ═══╣");
+        telemetry.addLine("╠═══ TURRET ═══╣");
+        telemetry.addData("│ Tracking", turretOdomTracking ? "ODOM ON ✓" : "centered");
+        telemetry.addData("│ Angle",    "%.1f°  (max ±%.0f°)", currentTurretAngle, TURRET_MAX_ANGLE);
+        telemetry.addData("│ ServoPos", "%.3f", turretServoPos);
+        telemetry.addData("│ Aligned",  isTurretAligned() ? "YES ✓" : "NO");
+        telemetry.addData("│ [GP2 L2]", "Toggle odom tracking");
+
+        telemetry.addLine("╠═══ DRIVETRAIN ALIGN ═══╣");
         telemetry.addData("│ Mode",    drivetrain.isGoalTrackingEnabled()
                 ? (drivetrain.isVisionAssistEnabled() ? "LIMELIGHT" : "ODOMETRY") : "OFF");
         telemetry.addData("│ Aligned", drivetrain.isAlignedWithGoal() ? "YES ✓" : "NO");
@@ -464,16 +639,16 @@ public class SWMRED extends OpMode {
         telemetry.addData("│ %s", shooter.getTelemetryString());
 
         telemetry.addLine("╠═══ SWM ═══╣");
-        telemetry.addData("│ Enabled",       swm.isEnabled() ? "YES" : "NO");
-        telemetry.addData("│ Heading Lock",  swm.isHeadingLockActive() ? "ACTIVE" : "waiting");
-        telemetry.addData("│ Ready",         swm.isReadyToShoot() ? "SHOOT NOW ✓" : "Waiting");
-        telemetry.addData("│ Distance",      "%.1f in", swm.getDistanceForRPM());
-        telemetry.addData("│ Target Hdg",    "%.1f°", Math.toDegrees(swm.getTargetHeading()));
-        telemetry.addData("│ Future X/Y",    "%.1f, %.1f", futurePose.getX(), futurePose.getY());
-        telemetry.addData("│ Heading Err",   "%.2f°", Math.toDegrees(
+        telemetry.addData("│ Enabled",      swm.isEnabled() ? "YES" : "NO");
+        telemetry.addData("│ Heading Lock", swm.isHeadingLockActive() ? "ACTIVE" : "waiting");
+        telemetry.addData("│ Ready",        swm.isReadyToShoot() ? "SHOOT NOW ✓" : "Waiting");
+        telemetry.addData("│ Distance",     "%.1f in", swm.getDistanceForRPM());
+        telemetry.addData("│ Target Hdg",   "%.1f°", Math.toDegrees(swm.getTargetHeading()));
+        telemetry.addData("│ Future X/Y",   "%.1f, %.1f", futurePose.getX(), futurePose.getY());
+        telemetry.addData("│ Hdg Err",      "%.2f°", Math.toDegrees(
                 normalizeAngle(swm.getTargetHeading() - pose.getHeading())));
-        telemetry.addData("│ Velocity",      "%.1f in/s", swm.getVelocityMagnitude());
-        telemetry.addData("│ Accel X/Y",     "%.1f, %.1f", swm.getAccelX(), swm.getAccelY());
+        telemetry.addData("│ Velocity",     "%.1f in/s", swm.getVelocityMagnitude());
+        telemetry.addData("│ Accel X/Y",    "%.1f, %.1f", swm.getAccelX(), swm.getAccelY());
 
         telemetry.addLine("╚═══════════════════════╝");
         telemetry.update();

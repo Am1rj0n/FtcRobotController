@@ -29,7 +29,7 @@ public class TransferShooterTest extends LinearOpMode {
         motor1 = hardwareMap.get(DcMotor.class, "intake");
         motor2 = hardwareMap.get(DcMotor.class, "transfer");
 
-        motor1.setDirection(DcMotorSimple.Direction.REVERSE);
+        motor1.setDirection(DcMotorSimple.Direction.FORWARD);
         motor2.setDirection(DcMotorSimple.Direction.REVERSE);
 
         motor1.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);

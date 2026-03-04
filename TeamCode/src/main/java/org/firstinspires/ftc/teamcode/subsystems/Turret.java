@@ -6,39 +6,55 @@ import com.pedropathing.geometry.Pose;
 
 public class Turret {
 
-    private final Servo turretServo;
-    private final Limelight limelight;
-    private final boolean isRed;
+    private final Servo      turretServo;
+    private final Limelight  limelight;
+    private final boolean    isRed;
 
     public enum Mode {
         ODOMETRY,   // Track goal using odometry
         LIMELIGHT,  // Track goal using vision
-        MANUAL      // Manual control
+        MANUAL      // Manual control (teleop sets angle directly)
     }
 
-    private Mode currentMode = Mode.ODOMETRY;
-    private double targetAngle = 0.0;
-    private double manualAngle = 0.0;
+    private Mode   currentMode  = Mode.ODOMETRY;
+    private double targetAngle  = 0.0;
+    private double manualAngle  = 0.0;
+
+    // =========================================================================
+    //  TUNING — change these to adjust turret behavior
+    // =========================================================================
 
     private static final double SERVO_CENTER = 0.5;
-    private static final double MIN_ANGLE    = -24.0; // degrees
-    private static final double MAX_ANGLE    =  24.0; // degrees
 
-    private static final double ALIGNMENT_TOLERANCE = 2.0; // degrees
 
-    // Goal positions (inches)
-    private static final double BLUE_GOAL_X = 0.0;
-    private static final double BLUE_GOAL_Y = 144.0;
-    private static final double RED_GOAL_X  = 144.0;
-    private static final double RED_GOAL_Y  = 144.0;
+    private static final double MAX_ANGLE = 50.0;  // degrees — currently ±50°
+
+
+    private static final double ALIGNMENT_TOLERANCE = 2.0;  // degrees
+
+    // =========================================================================
+    //  GOAL POSITIONS (inches) — must match SWM and Drivetrain
+    // =========================================================================
+    private static final double BLUE_GOAL_X = 7;
+    private static final double BLUE_GOAL_Y = 141.0;
+    private static final double RED_GOAL_X  = 134.5;
+    private static final double RED_GOAL_Y  = 140.0;
+
+    // =========================================================================
+    //  CONSTRUCTOR
+    // =========================================================================
 
     public Turret(HardwareMap hardwareMap, Limelight limelight, boolean isRed) {
-        turretServo = hardwareMap.servo.get("turret");
+        turretServo  = hardwareMap.servo.get("turret");
         this.limelight = limelight;
-        this.isRed = isRed;
+        this.isRed     = isRed;
 
         turretServo.setPosition(SERVO_CENTER);
     }
+
+    // =========================================================================
+    //  UPDATE — call every loop
+    // =========================================================================
 
     public void update(Pose robotPose) {
         switch (currentMode) {
@@ -52,9 +68,12 @@ public class Turret {
                 targetAngle = manualAngle;
                 break;
         }
-
         setServoAngle(targetAngle);
     }
+
+    // =========================================================================
+    //  ANGLE COMPUTATION
+    // =========================================================================
 
 
     private double calculateOdometryAngle(Pose pose) {
@@ -81,14 +100,19 @@ public class Turret {
         if (limelight.isAlignmentTagVisible()) {
             return clampAngle(limelight.getTx());
         }
-        return targetAngle; // Hold last position if no tag
+        return targetAngle; // hold last known position
     }
+
+    // =========================================================================
+    //  SERVO MAPPING
+    // =========================================================================
 
 
     private void setServoAngle(double angle) {
         angle = clampAngle(angle);
-        double servoPosition = SERVO_CENTER + (angle / MAX_ANGLE) * (1.0 - SERVO_CENTER);
-        turretServo.setPosition(servoPosition);
+        double pos = SERVO_CENTER + (angle / MAX_ANGLE) * (1.0 - SERVO_CENTER);
+        pos = Math.max(0.0, Math.min(1.0, pos));
+        turretServo.setPosition(pos);
     }
 
 
@@ -97,34 +121,38 @@ public class Turret {
         return (position - SERVO_CENTER) / (1.0 - SERVO_CENTER) * MAX_ANGLE;
     }
 
+    // =========================================================================
+    //  PUBLIC QUERIES
+    // =========================================================================
 
+    /** True if turret is within ALIGNMENT_TOLERANCE degrees of target. */
     public boolean isAligned() {
         return Math.abs(targetAngle - getCurrentAngle()) < ALIGNMENT_TOLERANCE;
     }
 
-
+    /** Distance from robot to goal in meters (used by Shooter for RPM). */
     public double distanceToGoalMeters(Pose pose) {
-        double goalX = isRed ? RED_GOAL_X : BLUE_GOAL_X;
-        double goalY = isRed ? RED_GOAL_Y : BLUE_GOAL_Y;
-
+        double goalX  = isRed ? RED_GOAL_X : BLUE_GOAL_X;
+        double goalY  = isRed ? RED_GOAL_Y : BLUE_GOAL_Y;
         double inches = Math.hypot(goalX - pose.getX(), goalY - pose.getY());
         return inches * 0.0254;
     }
 
-    // ==================== CONTROL ====================
+    /** Returns the current MAX_ANGLE so telemetry can display it. */
+    public double getMaxAngle() { return MAX_ANGLE; }
 
-    public void setMode(Mode mode) {
-        currentMode = mode;
-    }
+    // =========================================================================
+    //  CONTROL
+    // =========================================================================
 
-    public void setManualAngle(double angle) {
-        manualAngle = clampAngle(angle);
-    }
+    public void setMode(Mode mode)          { currentMode = mode; }
+    public void setManualAngle(double angle){ manualAngle = clampAngle(angle); }
+    public void centerTurret()              { setServoAngle(0.0); }
 
-    public Mode getCurrentMode()  { return currentMode; }
-    public double getTargetAngle(){ return targetAngle; }
+    public Mode   getCurrentMode()  { return currentMode; }
+    public double getTargetAngle()  { return targetAngle; }
 
     private double clampAngle(double angle) {
-        return Math.max(MIN_ANGLE, Math.min(MAX_ANGLE, angle));
+        return Math.max(-MAX_ANGLE, Math.min(MAX_ANGLE, angle));
     }
 }
