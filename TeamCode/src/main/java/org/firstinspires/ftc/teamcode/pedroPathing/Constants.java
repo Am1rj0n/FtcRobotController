@@ -3,6 +3,7 @@ package org.firstinspires.ftc.teamcode.pedroPathing;
 import com.pedropathing.control.FilteredPIDFCoefficients;
 import com.pedropathing.control.PIDFCoefficients;
 import com.pedropathing.control.PIDFController;
+import com.pedropathing.control.PredictiveBrakingCoefficients;
 import com.pedropathing.follower.Follower;
 import com.pedropathing.follower.FollowerConstants;
 import com.pedropathing.ftc.FollowerBuilder;
@@ -16,24 +17,30 @@ import com.qualcomm.robotcore.hardware.HardwareMap;
 
 public class Constants {
 
+    private static final PredictiveBrakingCoefficients BRAKING_COEFFICIENTS =
+            new PredictiveBrakingCoefficients(
+                    0.5,
+                    0.05,
+                    0.001
+            ).withMaximumBrakingPower(0.8);
     public static FollowerConstants followerConstants = new FollowerConstants()
-            .mass(10.9)
-        .forwardZeroPowerAcceleration(-41.6225999)
-            .lateralZeroPowerAcceleration(-78.5697)
+            .mass(11.431)
+        .forwardZeroPowerAcceleration(-46.0668)
+            .lateralZeroPowerAcceleration(-72.720259)
 
 
            .translationalPIDFCoefficients(new PIDFCoefficients(
-                   0.12,
+                   0.14,
                     0.0001,
                     0.02,
-                    0.07
+                    0.05
             ))
             .translationalPIDFSwitch(3)
             .headingPIDFCoefficients(new PIDFCoefficients(
-                       2.0,
+                       2.2,
                       0.005,
                      0.2,
-                     0.03
+                     0.01
              ))
             .headingPIDFSwitch(0.1)
 
@@ -65,8 +72,8 @@ public class Constants {
 
 
 
-            .xVelocity(73.7451167)
-            .yVelocity(54.4023495);
+            .xVelocity(70.266922)
+            .yVelocity(53.334577);
 
     public static PinpointConstants localizerConstants = new PinpointConstants()
 

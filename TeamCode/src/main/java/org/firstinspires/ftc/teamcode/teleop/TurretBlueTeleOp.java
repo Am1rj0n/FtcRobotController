@@ -9,7 +9,6 @@ import com.qualcomm.robotcore.hardware.IMU;
 import com.qualcomm.robotcore.util.ElapsedTime;
 import com.pedropathing.follower.Follower;
 import com.pedropathing.geometry.Pose;
-
 import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
 import org.firstinspires.ftc.teamcode.subsystems.AutoPositionSubsystem;
 import org.firstinspires.ftc.teamcode.subsystems.AutoToTeleTransfer;
@@ -22,50 +21,51 @@ public class TurretBlueTeleOp extends OpMode {
     private static final boolean IS_RED = false;
 
     // =========================================================================
-    //  TURRET CONSTANTS  — change MAX_ANGLE here to adjust range anytime
+    //  TURRET CONSTANTS
     // =========================================================================
-    /**
-     * Physical range of the turret servo in degrees.
-     * ±50 means the servo can reach 50° left and 50° right of center.
-     * Formula: servoPos = 0.5 + (angleDeg / MAX_TURRET_ANGLE) * 0.5
-     * Change this one number to adjust the full range.
-     */
-    private static final double TURRET_MAX_ANGLE        = 50.0;   // degrees — tune for your servo
-    private static final double TURRET_CENTER_POS       = 0.5;    // servo center position
-    private static final double TURRET_ALIGN_TOLERANCE  = 2.0;    // degrees — "aligned" threshold
+    private static final double TURRET_MAX_ANGLE       = 50.0;
+    private static final double TURRET_CENTER_POS      = 0.5;
+    private static final double TURRET_ALIGN_TOLERANCE = 2.0;
+    private static final double TURRET_P               = 0.012;
+    private static final double TURRET_D               = 0.001;
 
     /**
-     * P gain for turret odom tracking PD loop.
-     * Higher = snappier, too high = jitter/oscillation on the servo.
+     * How fast GP2 left stick moves the turret servo manually.
+     * Units: servo position units per loop (0.0–1.0 range).
+     * 0.01 = full stick deflection moves ~0.01 servo units per loop (~20ms loop → ~0.5 units/sec).
+     * Increase if too slow, decrease if too twitchy.
      */
-    private static final double TURRET_P                = 0.012;  // servo units per degree error
-    private static final double TURRET_D                = 0.001;  // derivative damping
+    private static final double TURRET_MANUAL_SPEED    = 0.01;
 
-    // Goal positions (inches) — same as SWM and Turret subsystem
+    /**
+     * Dead zone for GP2 left stick X turret manual control.
+     * Stick only moves the turret when ALL tracking modes are OFF.
+     */
+    private static final double TURRET_MANUAL_DEADZONE = 0.10;
+
     private static final double GOAL_X = IS_RED ? 144.0 : 0.0;
     private static final double GOAL_Y = 144.0;
 
     // =========================================================================
-    //  DRIVETRAIN / FIELD-CENTRIC
+    //  DRIVETRAIN
     // =========================================================================
     private DcMotor frontLeft, frontRight, backLeft, backRight;
     private IMU     imu;
     private double  fieldCentricOffset = 0.0;
 
-    private static final boolean FIELD_CENTRIC  = true;
     private double speedMultiplier              = 0.7;
     private static final double MIN_SPEED       = 0.1;
     private static final double MAX_SPEED       = 1.0;
     private static final double SPEED_INCREMENT = 0.1;
 
     // =========================================================================
-    //  SWM HEADING CORRECTION (drivetrain) — same as NoTurretBlueTeleOp
+    //  SWM DRIVETRAIN HEADING CORRECTION (GP1 Options)
     // =========================================================================
-    private static final double SWM_HEADING_P   = 2.0;
-    private static final double SWM_HEADING_D   = 0.05;
-    private static final double SWM_MAX_TURN    = 0.6;
-    private double              swmLastError    = 0.0;
-    private final ElapsedTime   swmPidTimer     = new ElapsedTime();
+    private static final double SWM_HEADING_P = 2.0;
+    private static final double SWM_HEADING_D = 0.05;
+    private static final double SWM_MAX_TURN  = 0.6;
+    private double              swmLastError  = 0.0;
+    private final ElapsedTime   swmPidTimer   = new ElapsedTime();
 
     // =========================================================================
     //  SUBSYSTEMS
@@ -77,6 +77,7 @@ public class TurretBlueTeleOp extends OpMode {
     private ShootingWhileMoving   swm;
     private AutoPositionSubsystem autoPos;
     private Turret                turret;
+    private Lights                lights;
     private Follower              follower;
 
     private final ElapsedTime runtime = new ElapsedTime();
@@ -84,19 +85,19 @@ public class TurretBlueTeleOp extends OpMode {
     // =========================================================================
     //  TURRET STATE
     // =========================================================================
-    /**
-     * When true, turret tracks the goal via odometry PD loop (GP2 L2 toggle).
-     * When false, turret holds TURRET_CENTER_POS (center).
-     */
+    /** GP2 L2 — track goal from current odom pose. */
     private boolean turretOdomTracking = false;
 
-    // PD state for turret odom tracking
+    /**
+     * GP1 D-pad Up — 4th mode.
+     * Turret points at FUTURE predicted goal angle from SWM.
+     * Driver moves + rotates freely. Drivetrain does not correct heading.
+     */
+    private boolean turretSWMMode = false;
+
     private double            turretLastError = 0.0;
     private final ElapsedTime turretPidTimer  = new ElapsedTime();
-
-    // Current commanded servo position — always write through this so we
-    // never have multiple places fighting over the servo.
-    private double turretServoPos = TURRET_CENTER_POS;
+    private double            turretServoPos  = TURRET_CENTER_POS;
 
     // =========================================================================
     //  GP1 EDGE DETECTION
@@ -112,11 +113,12 @@ public class TurretBlueTeleOp extends OpMode {
     private boolean lastR3       = false;
     private boolean lastTouchpad = false;
     private boolean lastOptions  = false;
+    private boolean lastDpadUp   = false;
 
     // =========================================================================
     //  GP2 EDGE DETECTION
     // =========================================================================
-    private boolean lastGP2L2        = false;   // turret odom tracking toggle
+    private boolean lastGP2L2        = false;
     private boolean lastGP2R2        = false;
     private boolean lastGP2DpadUp    = false;
     private boolean lastGP2DpadDown  = false;
@@ -138,6 +140,7 @@ public class TurretBlueTeleOp extends OpMode {
 
     @Override
     public void init() {
+
         frontLeft  = hardwareMap.get(DcMotor.class, "front_left_motor");
         frontRight = hardwareMap.get(DcMotor.class, "front_right_motor");
         backLeft   = hardwareMap.get(DcMotor.class, "back_left_motor");
@@ -169,6 +172,7 @@ public class TurretBlueTeleOp extends OpMode {
         turret     = new Turret(hardwareMap, limelight, IS_RED);
         swm        = new ShootingWhileMoving(follower, shooter, turret, IS_RED);
         autoPos    = new AutoPositionSubsystem(follower, IS_RED);
+        lights     = new Lights(hardwareMap);
 
         telemetry.addData("Status",    "Turret Blue - Ready");
         telemetry.addData("Auto Pose", AutoToTeleTransfer.finalPose != null ? "YES" : "NO");
@@ -187,14 +191,13 @@ public class TurretBlueTeleOp extends OpMode {
 
         imu.resetYaw();
         fieldCentricOffset = imu.getRobotYawPitchRollAngles().getYaw(AngleUnit.RADIANS);
-
         limelight.start();
 
-        turretServoPos      = TURRET_CENTER_POS;
-        turretOdomTracking  = false;
-        turretLastError     = 0.0;
+        turretServoPos     = TURRET_CENTER_POS;
+        turretOdomTracking = false;
+        turretSWMMode      = false;
+        turretLastError    = 0.0;
         turretPidTimer.reset();
-
         swmLastError = 0.0;
         swmPidTimer.reset();
 
@@ -208,8 +211,6 @@ public class TurretBlueTeleOp extends OpMode {
         autoPos.update();
         swm.update();
         limelight.updateMegaTag2Orientation(follower);
-
-        // Update turret subsystem (needed for isAligned() / SWM integration)
         turret.update(follower.getPose());
 
         handleGP1Drive();
@@ -217,22 +218,26 @@ public class TurretBlueTeleOp extends OpMode {
         handleGP1Shooter();
         handleGP1Intake();
         handleGP1SWM();
+        handleGP1TurretSWM();
 
-        handleGP2TurretTracking();   // NEW — L2 toggle
+        handleGP2TurretOdomTracking();
+        handleGP2TurretManual();        // GP2 right stick X — manual servo sweep
         handleGP2Shoot();
         handleGP2Positioning();
         handleGP2Shooter();
         handleGP2Localization();
 
-        // Auto RPM based on distance (future pose if SWM on)
         if (shooter.isActive()) {
             shooter.setRPMForDistance(swm.getDistanceForRPM() * 0.0254);
         }
 
-        // Turret output — one write per loop, priority:
-        //   1. Odom tracking active → PD servo output
-        //   2. Tracking off → center
         applyTurretOutput();
+
+        // ── LIGHTS ──────────────────────────────────────────────────────────
+        // "Aligned" = turret is aimed AND (drivetrain is aligned OR tracking off)
+        boolean aligned = isTurretAligned()
+                && (!drivetrain.isGoalTrackingEnabled() || drivetrain.isAlignedWithGoal());
+        lights.update(shooter.isActive(), shooter.getRPMMode(), aligned);
 
         displayTelemetry();
     }
@@ -243,6 +248,7 @@ public class TurretBlueTeleOp extends OpMode {
         intake.stop();
         limelight.stop();
         autoPos.cancel();
+        lights.off();
         frontLeft.setPower(0);
         frontRight.setPower(0);
         backLeft.setPower(0);
@@ -254,116 +260,111 @@ public class TurretBlueTeleOp extends OpMode {
     // =========================================================================
 
     /**
-     * Computes and writes the final servo position every loop.
+     * Turret mode priority (highest wins):
      *
-     * When odom tracking is ON:
-     *   1. Compute global angle from robot to goal using atan2.
-     *   2. Subtract robot heading to get robot-relative turret angle.
-     *   3. Clamp to ±TURRET_MAX_ANGLE.
-     *   4. Run a PD loop to smooth the servo motion.
-     *   5. Map angle to [0,1] servo position.
+     *  1. turretSWMMode (GP1 D-pad Up)
+     *     → Future pose angle. Manual stick blocked while this is ON.
      *
-     * When odom tracking is OFF: hold center (TURRET_CENTER_POS).
+     *  2. turretOdomTracking (GP2 L2)
+     *     → Current pose angle. Manual stick blocked while this is ON.
      *
-     * To change the turret range later:  change TURRET_MAX_ANGLE.
-     * To change tracking aggression:     change TURRET_P / TURRET_D.
-     * To change alignment sensitivity:   change TURRET_ALIGN_TOLERANCE.
+     *  3. Neither tracking mode active → GP2 left stick X manual sweep
+     *     → Servo moves directly with stick. Only available when both tracking
+     *       modes are off. Stick returning to center holds the servo in place.
+     *
+     *  4. Neither tracking AND stick centered
+     *     → Servo holds center.
      */
     private void applyTurretOutput() {
-        if (turretOdomTracking) {
+        double stickX = gamepad2.left_stick_x;
+        boolean trackingActive = turretSWMMode || turretOdomTracking;
+        boolean manualActive   = !trackingActive && Math.abs(stickX) > TURRET_MANUAL_DEADZONE;
+
+        if (turretSWMMode) {
+            turretServoPos = calculateTurretSWMPosition();
+            turretServoPos = Math.max(0.0, Math.min(1.0, turretServoPos));
+            turret.setMode(Turret.Mode.ODOMETRY);
+        } else if (turretOdomTracking) {
             turretServoPos = calculateTurretOdomPosition();
-        } else {
-            turretServoPos = TURRET_CENTER_POS;
-            turretLastError = 0.0;  // reset so there's no jump when re-enabling
+            turretServoPos = Math.max(0.0, Math.min(1.0, turretServoPos));
+            turret.setMode(Turret.Mode.ODOMETRY);
+        } else if (manualActive) {
+            // Tracking is OFF — left stick drives servo directly
+            turretServoPos += stickX * TURRET_MANUAL_SPEED;
+            turretServoPos  = Math.max(0.0, Math.min(1.0, turretServoPos));
+            turretLastError = 0.0;   // keep PD clean for if tracking is re-enabled
             turretPidTimer.reset();
+            turret.setMode(Turret.Mode.MANUAL);
+        } else {
+            // Tracking off AND stick centered → hold center
+            turretServoPos  = TURRET_CENTER_POS;
+            turretLastError = 0.0;
+            turretPidTimer.reset();
+            turret.setMode(Turret.Mode.MANUAL);
         }
 
-        // Clamp to valid servo range
-        turretServoPos = Math.max(0.0, Math.min(1.0, turretServoPos));
-
-        // Write to the turret subsystem's servo via the existing setServoAngle path.
-        // We bypass Turret.update() output and write the servo directly here so
-        // the teleop has full priority. Alternatively, call turret.setMode(MANUAL)
-        // and turret.setManualAngle() if you prefer routing through the subsystem.
-        //
-        // Direct approach (simplest):
         turret.setManualAngle(servoPositionToAngle(turretServoPos));
-        turret.setMode(turretOdomTracking ? Turret.Mode.ODOMETRY : Turret.Mode.MANUAL);
     }
 
-    /**
-     * PD controller: computes target servo position using odometry.
-     *
-     * Error = desired turret angle (robot-relative) - current turret angle.
-     * Output is clamped so the servo can't slam to an extreme in one loop.
-     */
+    private double calculateTurretSWMPosition() {
+        if (!swm.isHeadingLockActive()) return turretServoPos;
+
+        double desiredRad = swm.getTargetHeading() - follower.getPose().getHeading();
+        while (desiredRad >  Math.PI) desiredRad -= 2 * Math.PI;
+        while (desiredRad < -Math.PI) desiredRad += 2 * Math.PI;
+
+        double deg = Math.toDegrees(desiredRad);
+        deg = Math.max(-TURRET_MAX_ANGLE, Math.min(TURRET_MAX_ANGLE, deg));
+        return runTurretPD(deg);
+    }
+
     private double calculateTurretOdomPosition() {
-        Pose pose = follower.getPose();
+        Pose   p     = follower.getPose();
+        double angle = Math.toDegrees(Math.atan2(GOAL_Y - p.getY(), GOAL_X - p.getX()))
+                - Math.toDegrees(p.getHeading());
+        while (angle >  180) angle -= 360;
+        while (angle < -180) angle += 360;
+        angle = Math.max(-TURRET_MAX_ANGLE, Math.min(TURRET_MAX_ANGLE, angle));
+        return runTurretPD(angle);
+    }
 
-        // Step 1: global angle from robot to goal
-        double dx = GOAL_X - pose.getX();
-        double dy = GOAL_Y - pose.getY();
-        double globalAngleToGoal = Math.toDegrees(Math.atan2(dy, dx));
-
-        // Step 2: robot-relative angle = global angle minus robot heading
-        double robotHeading = Math.toDegrees(pose.getHeading());
-        double desiredTurretAngle = globalAngleToGoal - robotHeading;
-
-        // Normalize to ±180
-        while (desiredTurretAngle >  180) desiredTurretAngle -= 360;
-        while (desiredTurretAngle < -180) desiredTurretAngle += 360;
-
-        // Clamp to physical range
-        desiredTurretAngle = Math.max(-TURRET_MAX_ANGLE, Math.min(TURRET_MAX_ANGLE, desiredTurretAngle));
-
-        // Step 3: current servo angle (back-calculate from position)
-        double currentAngle = servoPositionToAngle(turretServoPos);
-
-        // Step 4: PD
-        double error      = desiredTurretAngle - currentAngle;
+    private double runTurretPD(double desiredDeg) {
+        double current    = servoPositionToAngle(turretServoPos);
+        double error      = desiredDeg - current;
         double dt         = turretPidTimer.seconds();
         double derivative = (dt > 0.001) ? (error - turretLastError) / dt : 0.0;
         double output     = (error * TURRET_P) + (derivative * TURRET_D);
-
-        turretLastError = error;
+        turretLastError   = error;
         turretPidTimer.reset();
-
-        // Step 5: apply output to current position (incremental PD)
         return turretServoPos + output;
     }
 
-    /**
-     * Convert servo position [0,1] back to angle in degrees.
-     * Inverse of: pos = 0.5 + (angle / MAX) * 0.5
-     */
     private double servoPositionToAngle(double pos) {
         return (pos - TURRET_CENTER_POS) / 0.5 * TURRET_MAX_ANGLE;
     }
 
-    /**
-     * Convert angle in degrees to servo position [0,1].
-     */
-    private double angleToDegServoPos(double angleDeg) {
-        return TURRET_CENTER_POS + (angleDeg / TURRET_MAX_ANGLE) * 0.5;
-    }
-
-    /** True if turret is within TURRET_ALIGN_TOLERANCE of desired angle. */
     private boolean isTurretAligned() {
-        if (!turretOdomTracking) return false;
-        Pose   pose              = follower.getPose();
-        double dx                = GOAL_X - pose.getX();
-        double dy                = GOAL_Y - pose.getY();
-        double globalAngle       = Math.toDegrees(Math.atan2(dy, dx));
-        double desiredAngle      = globalAngle - Math.toDegrees(pose.getHeading());
-        while (desiredAngle >  180) desiredAngle -= 360;
-        while (desiredAngle < -180) desiredAngle += 360;
-        desiredAngle = Math.max(-TURRET_MAX_ANGLE, Math.min(TURRET_MAX_ANGLE, desiredAngle));
-        double currentAngle = servoPositionToAngle(turretServoPos);
-        return Math.abs(desiredAngle - currentAngle) < TURRET_ALIGN_TOLERANCE;
+        double desired;
+        if (turretSWMMode && swm.isHeadingLockActive()) {
+            double rel = Math.toDegrees(swm.getTargetHeading() - follower.getPose().getHeading());
+            while (rel >  180) rel -= 360;
+            while (rel < -180) rel += 360;
+            desired = Math.max(-TURRET_MAX_ANGLE, Math.min(TURRET_MAX_ANGLE, rel));
+        } else if (turretOdomTracking) {
+            Pose   p   = follower.getPose();
+            double rel = Math.toDegrees(Math.atan2(GOAL_Y - p.getY(), GOAL_X - p.getX()))
+                    - Math.toDegrees(p.getHeading());
+            while (rel >  180) rel -= 360;
+            while (rel < -180) rel += 360;
+            desired = Math.max(-TURRET_MAX_ANGLE, Math.min(TURRET_MAX_ANGLE, rel));
+        } else {
+            return false;
+        }
+        return Math.abs(desired - servoPositionToAngle(turretServoPos)) < TURRET_ALIGN_TOLERANCE;
     }
 
     // =========================================================================
-    //  DRIVE HANDLING — same as NoTurretBlueTeleOp
+    //  DRIVE
     // =========================================================================
 
     private void handleGP1Drive() {
@@ -378,10 +379,8 @@ public class TurretBlueTeleOp extends OpMode {
         double x  =  gamepad1.left_stick_x;
         double rx =  gamepad1.right_stick_x;
 
-        if (gamepad1.left_bumper && !lastL1)
-            speedMultiplier = Math.max(MIN_SPEED, speedMultiplier - SPEED_INCREMENT);
-        if (gamepad1.right_bumper && !lastR1)
-            speedMultiplier = Math.min(MAX_SPEED, speedMultiplier + SPEED_INCREMENT);
+        if (gamepad1.left_bumper  && !lastL1) speedMultiplier = Math.max(MIN_SPEED, speedMultiplier - SPEED_INCREMENT);
+        if (gamepad1.right_bumper && !lastR1) speedMultiplier = Math.min(MAX_SPEED, speedMultiplier + SPEED_INCREMENT);
         lastL1 = gamepad1.left_bumper;
         lastR1 = gamepad1.right_bumper;
 
@@ -397,21 +396,15 @@ public class TurretBlueTeleOp extends OpMode {
         }
         lastTouchpad = gamepad1.touchpad;
 
-        if (gamepad1.share) {
-            drivetrain.resetToCorner();
-            gamepad1.rumbleBlips(2);
-        }
+        if (gamepad1.share) { drivetrain.resetToCorner(); gamepad1.rumbleBlips(2); }
 
         boolean driverTurning = Math.abs(rx) > 0.05;
 
-        // Turn priority (same as NoTurretBlueTeleOp):
-        // 1. Driver manually turning → honour directly, reset SWM PD
-        // 2. SWM enabled → SWM future-pose PD correction
-        // 3. Drivetrain goal tracking → existing drivetrain PD
-        // 4. None → rx = 0
         if (driverTurning) {
             swmLastError = 0.0;
             swmPidTimer.reset();
+        } else if (turretSWMMode) {
+            // turret handles aiming — drivetrain rx stays 0, driver rotates freely
         } else if (swm.isEnabled() && swm.isHeadingLockActive()) {
             rx = calculateSWMTurnCorrection();
         } else if (drivetrain.isGoalTrackingEnabled()) {
@@ -422,41 +415,33 @@ public class TurretBlueTeleOp extends OpMode {
     }
 
     private double calculateSWMTurnCorrection() {
-        double currentHeading = follower.getPose().getHeading();
-        double targetHeading  = swm.getTargetHeading();
-        double error          = normalizeAngle(targetHeading - currentHeading);
-
+        double error      = normalizeAngle(swm.getTargetHeading() - follower.getPose().getHeading());
         double dt         = swmPidTimer.seconds();
         double derivative = (dt > 0.001) ? (error - swmLastError) / dt : 0.0;
-
-        double turn = (error * SWM_HEADING_P) + (derivative * SWM_HEADING_D);
-        turn = Math.max(-SWM_MAX_TURN, Math.min(SWM_MAX_TURN, turn));
-
+        double turn       = Math.max(-SWM_MAX_TURN, Math.min(SWM_MAX_TURN,
+                (error * SWM_HEADING_P) + (derivative * SWM_HEADING_D)));
         swmLastError = error;
         swmPidTimer.reset();
         return -turn;
     }
 
-    private double normalizeAngle(double angle) {
-        while (angle >  Math.PI) angle -= 2 * Math.PI;
-        while (angle < -Math.PI) angle += 2 * Math.PI;
-        return angle;
+    private double normalizeAngle(double a) {
+        while (a >  Math.PI) a -= 2 * Math.PI;
+        while (a < -Math.PI) a += 2 * Math.PI;
+        return a;
     }
 
     // =========================================================================
-    //  GP1 HANDLERS — identical to NoTurretBlueTeleOp
+    //  GP1 HANDLERS
     // =========================================================================
 
     private void handleGP1Alignment() {
         boolean l2 = gamepad1.left_trigger  > 0.5;
         boolean r2 = gamepad1.right_trigger > 0.5;
-
         if (l2 && !lastL2) { drivetrain.enableGoalTracking(true);  gamepad1.rumble(200); }
         if (r2 && !lastR2) { drivetrain.enableGoalTracking(false); gamepad1.rumble(200); }
         if (!l2 && !r2 && (lastL2 || lastR2)) drivetrain.disableGoalTracking();
-
-        lastL2 = l2;
-        lastR2 = r2;
+        lastL2 = l2; lastR2 = r2;
     }
 
     private void handleGP1Shooter() {
@@ -471,9 +456,7 @@ public class TurretBlueTeleOp extends OpMode {
         if (gamepad1.cross     && !lastCross)    intake.setMode(Intake.Mode.INTAKE);
         if (gamepad1.square    && !lastSquare)   intake.setMode(Intake.Mode.OFF);
         if (gamepad1.triangle  && !lastTriangle) intake.setMode(Intake.Mode.SPIT);
-        lastCross    = gamepad1.cross;
-        lastSquare   = gamepad1.square;
-        lastTriangle = gamepad1.triangle;
+        lastCross = gamepad1.cross; lastSquare = gamepad1.square; lastTriangle = gamepad1.triangle;
     }
 
     private void handleGP1SWM() {
@@ -486,35 +469,48 @@ public class TurretBlueTeleOp extends OpMode {
         lastOptions = gamepad1.options;
     }
 
+    /** GP1 D-pad Up — Turret SWM mode (4th mode). Toggle. Long rumble = ON. */
+    private void handleGP1TurretSWM() {
+        if (gamepad1.dpad_up && !lastDpadUp) {
+            turretSWMMode   = !turretSWMMode;
+            turretLastError = 0.0;
+            turretPidTimer.reset();
+            if (turretSWMMode) gamepad1.rumble(700);
+            else { turretServoPos = TURRET_CENTER_POS; gamepad1.rumble(150); }
+        }
+        lastDpadUp = gamepad1.dpad_up;
+    }
+
     // =========================================================================
     //  GP2 HANDLERS
     // =========================================================================
 
-    /**
-     * GP2 L2 — Toggle turret odom tracking.
-     *
-     * First press:  turret starts tracking the goal using odometry PD.
-     * Second press: turret returns to center (TURRET_CENTER_POS) and holds.
-     *
-     * This is exactly like the drivetrain goal tracking, but for the servo.
-     * The turret doesn't fight the driver — it's a toggle, not hold-to-track.
-     */
-    private void handleGP2TurretTracking() {
+    private void handleGP2TurretOdomTracking() {
         boolean l2 = gamepad2.left_trigger > 0.5;
-
         if (l2 && !lastGP2L2) {
             turretOdomTracking = !turretOdomTracking;
             turretLastError    = 0.0;
             turretPidTimer.reset();
-
-            if (turretOdomTracking) {
-                gamepad2.rumble(500);   // long buzz = tracking ON
-            } else {
-                turretServoPos = TURRET_CENTER_POS;  // snap back to center
-                gamepad2.rumble(200);                // short buzz = tracking OFF / centered
-            }
+            if (turretOdomTracking) gamepad2.rumble(500);
+            else { turretServoPos = TURRET_CENTER_POS; gamepad2.rumble(200); }
         }
         lastGP2L2 = l2;
+    }
+
+    /**
+     * GP2 Left Stick X — Manual turret sweep.
+     *
+     * Only active when BOTH turretOdomTracking AND turretSWMMode are OFF.
+     * If either tracking mode is on, the stick is completely ignored.
+     * Turn off tracking first (GP2 L2 or GP1 D-pad Up) to use manual sweep.
+     *
+     * Stick centered → servo holds wherever it stopped (does NOT snap to center).
+     *
+     * This handler is intentionally empty — all logic lives in applyTurretOutput()
+     * to preserve the single servo write-through pattern.
+     */
+    private void handleGP2TurretManual() {
+        // Logic handled inside applyTurretOutput() to keep one servo write point.
     }
 
     private void handleGP2Shoot() {
@@ -526,40 +522,31 @@ public class TurretBlueTeleOp extends OpMode {
 
     private void handleGP2Positioning() {
         if (gamepad2.dpad_up && !lastGP2DpadUp) {
-            autoPos.goToCloseShoot();
-            shooter.setCloseMode();
-            gateCycleActive = false;
-            gamepad1.rumble(300); gamepad2.rumble(300);
+            autoPos.goToCloseShoot(); shooter.setCloseMode();
+            gateCycleActive = false; gamepad1.rumble(300); gamepad2.rumble(300);
         }
         lastGP2DpadUp = gamepad2.dpad_up;
 
         if (gamepad2.dpad_down && !lastGP2DpadDown) {
-            autoPos.goToFarShoot();
-            shooter.setFarMode();
-            gateCycleActive = false;
-            gamepad1.rumble(300); gamepad2.rumble(300);
+            autoPos.goToFarShoot(); shooter.setFarMode();
+            gateCycleActive = false; gamepad1.rumble(300); gamepad2.rumble(300);
         }
         lastGP2DpadDown = gamepad2.dpad_down;
 
         if (gamepad2.dpad_left && !lastGP2DpadLeft) {
-            autoPos.goToPark();
-            gateCycleActive = false;
+            autoPos.goToPark(); gateCycleActive = false;
             gamepad1.rumble(300); gamepad2.rumble(300);
         }
         lastGP2DpadLeft = gamepad2.dpad_left;
 
         if (gamepad2.dpad_right && !lastGP2DpadRight) {
-            autoPos.goToGateCycle();
-            gateCycleActive = true;
-            intake.setMode(Intake.Mode.INTAKE);
-            gamepad1.rumble(300); gamepad2.rumble(300);
+            autoPos.goToGateCycle(); gateCycleActive = true;
+            intake.setMode(Intake.Mode.INTAKE); gamepad1.rumble(300); gamepad2.rumble(300);
         }
         lastGP2DpadRight = gamepad2.dpad_right;
 
         if (gamepad2.cross && !lastGP2X) {
-            autoPos.cancel();
-            gateCycleActive = false;
-            gamepad2.rumbleBlips(2);
+            autoPos.cancel(); gateCycleActive = false; gamepad2.rumbleBlips(2);
         }
         lastGP2X = gamepad2.cross;
 
@@ -574,16 +561,9 @@ public class TurretBlueTeleOp extends OpMode {
         }
         lastGP2Triangle = gamepad2.triangle;
 
-        if (gamepad2.square && !lastGP2Square) {
-            shooter.setAutoMode();
-            gamepad2.rumbleBlips(1);
-        }
+        if (gamepad2.square  && !lastGP2Square)  { shooter.setAutoMode();          gamepad2.rumbleBlips(1); }
+        if (gamepad2.circle  && !lastGP2Circle)  { shooter.setManualFromCurrent();  gamepad2.rumbleBlips(1); }
         lastGP2Square = gamepad2.square;
-
-        if (gamepad2.circle && !lastGP2Circle) {
-            shooter.setManualFromCurrent();
-            gamepad2.rumbleBlips(1);
-        }
         lastGP2Circle = gamepad2.circle;
 
         if (gamepad2.left_bumper  && !lastGP2L1) shooter.decreaseRPM();
@@ -594,9 +574,9 @@ public class TurretBlueTeleOp extends OpMode {
 
     private void handleGP2Localization() {
         if (gamepad2.share && !lastGP2Share) {
-            boolean success = limelight.megaTag2Localize(follower);
-            if (success) { gamepad2.rumble(1000); gamepad1.rumble(500); }
-            else          { gamepad2.rumbleBlips(3); }
+            boolean ok = limelight.megaTag2Localize(follower);
+            if (ok) { gamepad2.rumble(1000); gamepad1.rumble(500); }
+            else    { gamepad2.rumbleBlips(3); }
         }
         lastGP2Share = gamepad2.share;
     }
@@ -612,10 +592,21 @@ public class TurretBlueTeleOp extends OpMode {
                 imu.getRobotYawPitchRollAngles().getYaw(AngleUnit.RADIANS) - fieldCentricOffset);
         double currentTurretAngle = servoPositionToAngle(turretServoPos);
 
+        String turretModeStr;
+        boolean gp2ManualActive = !turretSWMMode && !turretOdomTracking
+                && Math.abs(gamepad2.left_stick_x) > TURRET_MANUAL_DEADZONE;
+        if      (gp2ManualActive)    turretModeStr = "MANUAL STICK ✓  [GP2 LS]";
+        else if (turretSWMMode)      turretModeStr = "SWM FUTURE ✓   [GP1 D-up]";
+        else if (turretOdomTracking) turretModeStr = "ODOM CURRENT   [GP2 L2]";
+        else                         turretModeStr = "CENTER / manual ready";
+
+        boolean aligned = isTurretAligned()
+                && (!drivetrain.isGoalTrackingEnabled() || drivetrain.isAlignedWithGoal());
+
         telemetry.addLine("╔═══ TURRET BLUE ═══╗");
         telemetry.addData("│ Intake",  intake.getCurrentMode());
         telemetry.addData("│ Speed",   "%.0f%%", speedMultiplier * 100);
-        telemetry.addData("│ Heading", "%.1f°  (R3 to reset)", headingDeg);
+        telemetry.addData("│ Heading", "%.1f°", headingDeg);
         telemetry.addData("│ AutoPos", autoPos.isActive() ? "ACTIVE" : "idle");
 
         telemetry.addLine("╠═══ POSE ═══╣");
@@ -623,11 +614,15 @@ public class TurretBlueTeleOp extends OpMode {
         telemetry.addData("│ Heading", "%.1f°", Math.toDegrees(pose.getHeading()));
 
         telemetry.addLine("╠═══ TURRET ═══╣");
-        telemetry.addData("│ Tracking", turretOdomTracking ? "ODOM ON ✓" : "centered");
-        telemetry.addData("│ Angle",    "%.1f°  (max ±%.0f°)", currentTurretAngle, TURRET_MAX_ANGLE);
-        telemetry.addData("│ ServoPos", "%.3f", turretServoPos);
-        telemetry.addData("│ Aligned",  isTurretAligned() ? "YES ✓" : "NO");
-        telemetry.addData("│ [GP2 L2]", "Toggle odom tracking");
+        telemetry.addData("│ Mode",    turretModeStr);
+        telemetry.addData("│ Angle",   "%.1f°  (max ±%.0f°)", currentTurretAngle, TURRET_MAX_ANGLE);
+        telemetry.addData("│ Servo",   "%.3f", turretServoPos);
+        telemetry.addData("│ Aligned", isTurretAligned() ? "YES ✓" : "NO");
+
+        telemetry.addLine("╠═══ LIGHTS ═══╣");
+        telemetry.addData("│ Shooter", shooter.isActive() ? "ON" : "OFF");
+        telemetry.addData("│ Mode",    shooter.getRPMMode());
+        telemetry.addData("│ Aligned", aligned ? "YES → BLINK ✓" : "NO → solid");
 
         telemetry.addLine("╠═══ DRIVETRAIN ALIGN ═══╣");
         telemetry.addData("│ Mode",    drivetrain.isGoalTrackingEnabled()
@@ -639,16 +634,14 @@ public class TurretBlueTeleOp extends OpMode {
         telemetry.addData("│ %s", shooter.getTelemetryString());
 
         telemetry.addLine("╠═══ SWM ═══╣");
-        telemetry.addData("│ Enabled",      swm.isEnabled() ? "YES" : "NO");
-        telemetry.addData("│ Heading Lock", swm.isHeadingLockActive() ? "ACTIVE" : "waiting");
-        telemetry.addData("│ Ready",        swm.isReadyToShoot() ? "SHOOT NOW ✓" : "Waiting");
-        telemetry.addData("│ Distance",     "%.1f in", swm.getDistanceForRPM());
-        telemetry.addData("│ Target Hdg",   "%.1f°", Math.toDegrees(swm.getTargetHeading()));
-        telemetry.addData("│ Future X/Y",   "%.1f, %.1f", futurePose.getX(), futurePose.getY());
-        telemetry.addData("│ Hdg Err",      "%.2f°", Math.toDegrees(
-                normalizeAngle(swm.getTargetHeading() - pose.getHeading())));
-        telemetry.addData("│ Velocity",     "%.1f in/s", swm.getVelocityMagnitude());
-        telemetry.addData("│ Accel X/Y",    "%.1f, %.1f", swm.getAccelX(), swm.getAccelY());
+        telemetry.addData("│ DT Mode",     swm.isEnabled()  ? "ON (Options)" : "OFF");
+        telemetry.addData("│ Turret Mode", turretSWMMode    ? "ON (D-up) ✓"  : "OFF");
+        telemetry.addData("│ Ready",       swm.isReadyToShoot() ? "SHOOT NOW ✓" : "waiting");
+        telemetry.addData("│ Distance",    "%.1f in", swm.getDistanceForRPM());
+        telemetry.addData("│ Target Hdg",  "%.1f°", Math.toDegrees(swm.getTargetHeading()));
+        telemetry.addData("│ Future X/Y",  "%.1f, %.1f", futurePose.getX(), futurePose.getY());
+        telemetry.addData("│ Velocity",    "%.1f in/s", swm.getVelocityMagnitude());
+        telemetry.addData("│ Accel X/Y",   "%.1f, %.1f", swm.getAccelX(), swm.getAccelY());
 
         telemetry.addLine("╚═══════════════════════╝");
         telemetry.update();

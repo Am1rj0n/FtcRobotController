@@ -1,4 +1,4 @@
-package org.firstinspires.ftc.teamcode.auto;
+package org.firstinspires.ftc.teamcode.auto.closewall;
 
 import com.qualcomm.robotcore.eventloop.opmode.Autonomous;
 import com.qualcomm.robotcore.eventloop.opmode.OpMode;
@@ -7,21 +7,22 @@ import com.qualcomm.robotcore.util.ElapsedTime;
 import com.bylazar.configurables.annotations.Configurable;
 import com.bylazar.telemetry.TelemetryManager;
 import com.bylazar.telemetry.PanelsTelemetry;
+import java.util.Locale;
 
 import org.firstinspires.ftc.teamcode.pedroPathing.Constants;
 import org.firstinspires.ftc.teamcode.subsystems.AutoToTeleTransfer;
 import org.firstinspires.ftc.teamcode.subsystems.Intake;
 import org.firstinspires.ftc.teamcode.subsystems.Shooter;
+import org.firstinspires.ftc.teamcode.subsystems.Lights;
 
 import com.pedropathing.follower.Follower;
-import com.pedropathing.geometry.BezierCurve;
 import com.pedropathing.geometry.BezierLine;
 import com.pedropathing.geometry.Pose;
 import com.pedropathing.paths.PathChain;
 
-@Autonomous(name = "PINKxROLL Blue", group = "Autonomous")
+@Autonomous(name = "Auto 12 Close Blue MAIN", group = "Solo")
 @Configurable
-public class PINKxROLLBlue extends OpMode {
+public class Auto12CloseBlue extends OpMode {
 
     // =====================================================================
     //  TELEMETRY / HARDWARE
@@ -32,16 +33,17 @@ public class PINKxROLLBlue extends OpMode {
 
     private Intake  intake;
     private Shooter shooter;
+    private Lights  lights;
     private Servo   turretServo;
 
     // =====================================================================
     //  TIMERS
     // =====================================================================
-    private final ElapsedTime shootTimer      = new ElapsedTime();
-    private final ElapsedTime pathTimer       = new ElapsedTime();
-    private final ElapsedTime spinupTimer     = new ElapsedTime();
-    private final ElapsedTime gateWaitTimer   = new ElapsedTime(); // dwell at end of GATEOPEN
-    private final ElapsedTime intakeEndTimer  = new ElapsedTime(); // dwell at end of INTAKE paths
+    private final ElapsedTime shootTimer  = new ElapsedTime();
+    private final ElapsedTime pathTimer   = new ElapsedTime();
+    private final ElapsedTime alignTimer    = new ElapsedTime();
+    private final ElapsedTime gateOpenTimer  = new ElapsedTime();
+    private final ElapsedTime spinupTimer = new ElapsedTime();
 
     // =====================================================================
     //  TURRET
@@ -51,48 +53,43 @@ public class PINKxROLLBlue extends OpMode {
     // =====================================================================
     //  SHOOTER RPMs  — tune each independently
     // =====================================================================
-    private static final double SHOOT_0_RPM = 3800.0;
-    private static final double SHOOT_1_RPM = 3800.0;
-    private static final double SHOOT_2_RPM = 3800.0;
-    private static final double SHOOT_3_RPM = 3800.0;
+    private static final double SHOOT_0_RPM = 3000.0;
+    private static final double SHOOT_1_RPM = 3000.0;
+    private static final double SHOOT_2_RPM = 3000.0;
+    private static final double SHOOT_3_RPM = 3000.0;
 
     // =====================================================================
-    //  TIMING CONSTANTS  — all easily tunable here
+    //  TIMING CONSTANTS
     // =====================================================================
-    private static final double INITIAL_SPINUP_DURATION = 1.0;   // seconds before first path
-    private static final double SPINUP_DURATION         = 0.3;   // seconds spinup before each shoot
-    private static final double SHOOT_DURATION          = 1.5;   // seconds of active disc feeding
-
-    // How long to pause at the END of each GATEOPEN path before moving on
-    private static final double GATE_OPEN_DWELL_MS  = 300.0;  // ms
-
-    // How long to pause at end of each INTAKE path (ball settling time)
-    private static final double INTAKE_END_DWELL_MS = 50;    // ms — set > 0 to add dwell
-
-    // =====================================================================
-    //  PATH SPEEDS  — tune each class independently
-    // =====================================================================
-    private static final double SHOOT_PATH_SPEED    = 0.9;    // full speed to shoot positions
-    private static final double INTAKE_PATH_SPEED   = 0.85;    // slightly reduced for intaking
-    private static final double GATE_PATH_SPEED     = 0.9;    // slower for gate approach + open
+    private static final double INITIAL_SPINUP_DURATION = 1.0;
+    private static final double SPINUP_DURATION         = 0.8;
+    private static final double SHOOT_DURATION          = 1.9;
+    /** Max time to wait for alignment before shooting anyway. */
+    private static final double ALIGN_TIMEOUT_S        = 1.2;
+    /** Extra dwell AFTER gate push completes (0 = off). */
+    private static final double GATE_OPEN_DWELL_MS     = 500;
 
     // =====================================================================
     //  PER-PATH TIMEOUTS  — tune each independently (seconds)
     // =====================================================================
-    private static final double T_SHOOT0     = 4.0;
-    private static final double T_INTAKEPOS1 = 2.0;
-    private static final double T_INTAKE1    = 3.0;
-    private static final double T_GATEPOS    = 2.0;
-    private static final double T_GATEOPEN   = 2.0;
-    private static final double T_SHOOT1     = 3.0;
-    private static final double T_INTAKEPOS2 = 3.0;
-    private static final double T_INTAKE2    = 3.0;
-    private static final double T_GATEPOS2   = 2.0;
-    private static final double T_GATEOPEN2  = 2.0;
-    private static final double T_SHOOT2     = 3.0;
-    private static final double T_INTAKEPOS3 = 3.0;
-    private static final double T_INTAKE3    = 3.0;
-    private static final double T_SHOOT3     = 4.0;
+    private static final double T_SHOOT0      = 4.0;
+    private static final double T_INTAKEPOS1  = 3.0;
+    private static final double T_INTAKE1     = 3.0;
+    private static final double T_GATEPOS     = 2.0;
+    private static final double T_GATEOPEN    = 2.0;
+    private static final double T_SHOOT1      = 3.0;
+    private static final double T_INTAKEPOS2  = 3.0;
+    private static final double T_INTAKE2     = 3.0;
+    private static final double T_SHOOT2      = 3.0;
+    private static final double T_INTAKEPOS3  = 3.0;
+    private static final double T_INTAKE3     = 3.0;
+    private static final double T_SHOOT3      = 3.0;
+    private static final double T_LEAVE       = 3.0;
+
+    // =====================================================================
+    //  PATH SPEED
+    // =====================================================================
+    private static final double INTAKE_PATH_SPEED = 0.9;
 
     // =====================================================================
     //  INTERNAL STATE
@@ -105,15 +102,12 @@ public class PINKxROLLBlue extends OpMode {
     private enum AutoState {
         INITIAL_SPINUP,
 
-        // Preload shoot
         SHOOT_0_PATH,
         SHOOT_0_SPINUP,
         SHOOT_0,
 
-        // Cycle 1 — row intake → gate → shoot
         INTAKEPOS1,
         INTAKE1,
-        INTAKE1_DWELL,
         GATEPOS,
         GATEOPEN,
         GATEOPEN_DWELL,
@@ -121,25 +115,19 @@ public class PINKxROLLBlue extends OpMode {
         SHOOT1_SPINUP,
         SHOOT1,
 
-        // Cycle 2 — row intake → gate → shoot
         INTAKEPOS2,
         INTAKE2,
-        INTAKE2_DWELL,
-        GATEPOS2,
-        GATEOPEN2,
-        GATEOPEN2_DWELL,
         SHOOT2_PATH,
         SHOOT2_SPINUP,
         SHOOT2,
 
-        // Cycle 3 — long row intake → shoot
         INTAKEPOS3,
         INTAKE3,
-        INTAKE3_DWELL,
         SHOOT3_PATH,
         SHOOT3_SPINUP,
         SHOOT3,
 
+        LEAVE,
         DONE
     }
 
@@ -153,17 +141,18 @@ public class PINKxROLLBlue extends OpMode {
         panelsTelemetry = PanelsTelemetry.INSTANCE.getTelemetry();
 
         follower = Constants.createFollower(hardwareMap);
-        follower.setStartingPose(new Pose(25.526, 129.737, Math.toRadians(144)));
+        follower.setStartingPose(new Pose(35.000, 137.000, Math.toRadians(180)));
 
         intake  = new Intake(hardwareMap);
         shooter = new Shooter(hardwareMap);
+        lights  = new Lights(hardwareMap);
 
         turretServo = hardwareMap.servo.get("turret");
         turretServo.setPosition(FIXED_TURRET_POSITION);
 
         paths = new Paths(follower);
 
-        panelsTelemetry.debug("Status", "PINKxROLL Blue - Ready");
+        panelsTelemetry.debug("Status", "Auto 12 Close Blue - Ready");
         panelsTelemetry.update(telemetry);
     }
 
@@ -184,22 +173,21 @@ public class PINKxROLLBlue extends OpMode {
         shooter.periodic();
 
         autonomousUpdate();
+        lights.update(shooter.isActive(), shooter.getRPMMode(), isAligned());
 
         AutoToTeleTransfer.finalPose = follower.getPose();
 
-        panelsTelemetry.debug("State",        currentState.name());
-        panelsTelemetry.debug("T Value",      follower.getCurrentTValue());
-        panelsTelemetry.debug("Busy",         follower.isBusy());
-        panelsTelemetry.debug("Path Timer",   String.format("%.2f / %.1f", pathTimer.seconds(), currentPathTimeout));
-        panelsTelemetry.debug("Spinup",       String.format("%.2f / %.1f", spinupTimer.seconds(), SPINUP_DURATION));
-        panelsTelemetry.debug("Gate Dwell",   String.format("%.0f / %.0f ms", gateWaitTimer.milliseconds(), GATE_OPEN_DWELL_MS));
-        panelsTelemetry.debug("Intake Dwell", String.format("%.0f / %.0f ms", intakeEndTimer.milliseconds(), INTAKE_END_DWELL_MS));
-        panelsTelemetry.debug("RPM Target",   shooter.getTargetRPM());
-        panelsTelemetry.debug("RPM Read",     shooter.getReadRPM());
-        panelsTelemetry.debug("At Speed",     shooter.isAtSpeed());
-        panelsTelemetry.debug("Intake",       intake.getCurrentMode().toString());
-        panelsTelemetry.debug("X",            follower.getPose().getX());
-        panelsTelemetry.debug("Y",            follower.getPose().getY());
+        panelsTelemetry.debug("State",      currentState.name());
+        panelsTelemetry.debug("T Value",    follower.getCurrentTValue());
+        panelsTelemetry.debug("Busy",       follower.isBusy());
+        panelsTelemetry.debug("Path Timer", String.format(Locale.US, "%.2f / %.1f", pathTimer.seconds(), currentPathTimeout));
+        panelsTelemetry.debug("Spinup",     String.format(Locale.US, "%.2f / %.1f", spinupTimer.seconds(), SPINUP_DURATION));
+        panelsTelemetry.debug("RPM Target", shooter.getTargetRPM());
+        panelsTelemetry.debug("RPM Read",   shooter.getReadRPM());
+        panelsTelemetry.debug("At Speed",   shooter.isAtSpeed());
+        panelsTelemetry.debug("Intake",     intake.getCurrentMode().toString());
+        panelsTelemetry.debug("X",          follower.getPose().getX());
+        panelsTelemetry.debug("Y",          follower.getPose().getY());
         panelsTelemetry.update(telemetry);
     }
 
@@ -207,19 +195,13 @@ public class PINKxROLLBlue extends OpMode {
     public void stop() {
         shooter.stop();
         intake.stop();
+        lights.off();
         AutoToTeleTransfer.finalPose = follower.getPose();
     }
 
     // =====================================================================
     //  HELPERS
     // =====================================================================
-
-    private void startShootPath(PathChain path, double timeout) {
-        follower.setMaxPower(SHOOT_PATH_SPEED);
-        follower.followPath(path, true);
-        pathTimer.reset();
-        currentPathTimeout = timeout;
-    }
 
     private void startIntakePath(PathChain path, double timeout) {
         follower.setMaxPower(INTAKE_PATH_SPEED);
@@ -228,21 +210,21 @@ public class PINKxROLLBlue extends OpMode {
         currentPathTimeout = timeout;
     }
 
-    private void startGatePath(PathChain path, double timeout) {
-        follower.setMaxPower(GATE_PATH_SPEED);
+    private void startShootPath(PathChain path, double timeout) {
+        follower.setMaxPower(1.0);
         follower.followPath(path, true);
         pathTimer.reset();
         currentPathTimeout = timeout;
     }
 
-    /** Standard 95% T OR done OR timeout — used for intake and transit paths. */
+    /** Intake/transit: 95% T-value OR follower done OR timeout. */
     private boolean pathDone() {
         return follower.getCurrentTValue() >= 0.95
                 || !follower.isBusy()
                 || pathTimer.seconds() >= currentPathTimeout;
     }
 
-    /** Shoot positioning: fully done OR timeout (no T-value shortcut). */
+    /** Shoot positioning: follower fully done OR timeout. */
     private boolean shootPathDone() {
         return !follower.isBusy()
                 || pathTimer.seconds() >= currentPathTimeout;
@@ -255,22 +237,26 @@ public class PINKxROLLBlue extends OpMode {
     // =====================================================================
     //  STATE MACHINE
     // =====================================================================
+
+    private boolean isAligned() {
+        return shooter.isAtSpeed();
+    }
     private void autonomousUpdate() {
         switch (currentState) {
 
             // -----------------------------------------------------------------
-            // INITIAL SPINUP — 1s flywheel ramp before any movement
+            // INITIAL SPINUP
             // -----------------------------------------------------------------
             case INITIAL_SPINUP:
                 intake.setMode(Intake.Mode.INTAKE);
                 if (spinupTimer.seconds() >= INITIAL_SPINUP_DURATION) {
-                    startShootPath(paths.SHOOT0, T_SHOOT0);
+                    startShootPath(paths.shoot0, T_SHOOT0);
                     currentState = AutoState.SHOOT_0_PATH;
                 }
                 break;
 
             // -----------------------------------------------------------------
-            // SHOOT 0 — preload
+            // SHOOT 0  — preload
             // -----------------------------------------------------------------
             case SHOOT_0_PATH:
                 intake.setMode(Intake.Mode.INTAKE);
@@ -282,7 +268,9 @@ public class PINKxROLLBlue extends OpMode {
 
             case SHOOT_0_SPINUP:
                 intake.setMode(Intake.Mode.INTAKE);
-                if (spinupTimer.seconds() >= SPINUP_DURATION) {
+                alignTimer.reset();
+                if (spinupTimer.seconds() >= SPINUP_DURATION
+                        && (isAligned() || alignTimer.seconds() >= ALIGN_TIMEOUT_S)) {
                     shootTimer.reset();
                     intake.setMode(Intake.Mode.SHOOT);
                     currentState = AutoState.SHOOT_0;
@@ -294,18 +282,18 @@ public class PINKxROLLBlue extends OpMode {
                 if (shootTimer.seconds() >= SHOOT_DURATION) {
                     setPreShootRPM(SHOOT_1_RPM);
                     intake.setMode(Intake.Mode.INTAKE);
-                    startIntakePath(paths.INTAKEPOS1, T_INTAKEPOS1);
+                    startIntakePath(paths.intakepos1, T_INTAKEPOS1);
                     currentState = AutoState.INTAKEPOS1;
                 }
                 break;
 
             // -----------------------------------------------------------------
-            // CYCLE 1 — row intake at Y~84 → gate curve → gate push → shoot
+            // CYCLE 1  — intake at high row then open gate
             // -----------------------------------------------------------------
             case INTAKEPOS1:
                 intake.setMode(Intake.Mode.INTAKE);
                 if (pathDone()) {
-                    startIntakePath(paths.INTAKE1, T_INTAKE1);
+                    startIntakePath(paths.intake1, T_INTAKE1);
                     currentState = AutoState.INTAKE1;
                 }
                 break;
@@ -313,40 +301,32 @@ public class PINKxROLLBlue extends OpMode {
             case INTAKE1:
                 intake.setMode(Intake.Mode.INTAKE);
                 if (pathDone()) {
-                    intakeEndTimer.reset();
-                    currentState = AutoState.INTAKE1_DWELL;
-                }
-                break;
-
-            case INTAKE1_DWELL:
-                intake.setMode(Intake.Mode.INTAKE);
-                if (intakeEndTimer.milliseconds() >= INTAKE_END_DWELL_MS) {
-                    startGatePath(paths.GATEPOS, T_GATEPOS);
+                    startIntakePath(paths.gatepos, T_GATEPOS);
                     currentState = AutoState.GATEPOS;
                 }
                 break;
 
-            case GATEPOS:
+            case GATEPOS:       // back to gate approach position
                 intake.setMode(Intake.Mode.INTAKE);
                 if (pathDone()) {
-                    startGatePath(paths.GATEOPEN, T_GATEOPEN);
+                    startIntakePath(paths.gateopen, T_GATEOPEN);
                     currentState = AutoState.GATEOPEN;
                 }
                 break;
 
-            case GATEOPEN:
+            case GATEOPEN:      // push gate open
                 intake.setMode(Intake.Mode.INTAKE);
                 if (pathDone()) {
                     follower.breakFollowing();
-                    gateWaitTimer.reset();
+                    gateOpenTimer.reset();
                     currentState = AutoState.GATEOPEN_DWELL;
                 }
                 break;
 
             case GATEOPEN_DWELL:
                 intake.setMode(Intake.Mode.INTAKE);
-                if (gateWaitTimer.milliseconds() >= GATE_OPEN_DWELL_MS) {
-                    startShootPath(paths.SHOOT1, T_SHOOT1);
+                if (gateOpenTimer.milliseconds() >= GATE_OPEN_DWELL_MS) {
+                    startShootPath(paths.shoot1, T_SHOOT1);
                     currentState = AutoState.SHOOT1_PATH;
                 }
                 break;
@@ -361,7 +341,9 @@ public class PINKxROLLBlue extends OpMode {
 
             case SHOOT1_SPINUP:
                 intake.setMode(Intake.Mode.INTAKE);
-                if (spinupTimer.seconds() >= SPINUP_DURATION) {
+                alignTimer.reset();
+                if (spinupTimer.seconds() >= SPINUP_DURATION
+                        && (isAligned() || alignTimer.seconds() >= ALIGN_TIMEOUT_S)) {
                     shootTimer.reset();
                     intake.setMode(Intake.Mode.SHOOT);
                     currentState = AutoState.SHOOT1;
@@ -373,18 +355,18 @@ public class PINKxROLLBlue extends OpMode {
                 if (shootTimer.seconds() >= SHOOT_DURATION) {
                     setPreShootRPM(SHOOT_2_RPM);
                     intake.setMode(Intake.Mode.INTAKE);
-                    startIntakePath(paths.INTAKEPOS2, T_INTAKEPOS2);
+                    startIntakePath(paths.intakepos2, T_INTAKEPOS2);
                     currentState = AutoState.INTAKEPOS2;
                 }
                 break;
 
             // -----------------------------------------------------------------
-            // CYCLE 2 — row intake at Y~60 → gate curve → gate push → shoot
+            // CYCLE 2
             // -----------------------------------------------------------------
             case INTAKEPOS2:
                 intake.setMode(Intake.Mode.INTAKE);
                 if (pathDone()) {
-                    startIntakePath(paths.INTAKE2, T_INTAKE2);
+                    startIntakePath(paths.intake2, T_INTAKE2);
                     currentState = AutoState.INTAKE2;
                 }
                 break;
@@ -392,40 +374,7 @@ public class PINKxROLLBlue extends OpMode {
             case INTAKE2:
                 intake.setMode(Intake.Mode.INTAKE);
                 if (pathDone()) {
-                    intakeEndTimer.reset();
-                    currentState = AutoState.INTAKE2_DWELL;
-                }
-                break;
-
-            case INTAKE2_DWELL:
-                intake.setMode(Intake.Mode.INTAKE);
-                if (intakeEndTimer.milliseconds() >= INTAKE_END_DWELL_MS) {
-                    startGatePath(paths.GATEPOS2, T_GATEPOS2);
-                    currentState = AutoState.GATEPOS2;
-                }
-                break;
-
-            case GATEPOS2:
-                intake.setMode(Intake.Mode.INTAKE);
-                if (pathDone()) {
-                    startGatePath(paths.GATEOPEN2, T_GATEOPEN2);
-                    currentState = AutoState.GATEOPEN2;
-                }
-                break;
-
-            case GATEOPEN2:
-                intake.setMode(Intake.Mode.INTAKE);
-                if (pathDone()) {
-                    follower.breakFollowing();
-                    gateWaitTimer.reset();
-                    currentState = AutoState.GATEOPEN2_DWELL;
-                }
-                break;
-
-            case GATEOPEN2_DWELL:
-                intake.setMode(Intake.Mode.INTAKE);
-                if (gateWaitTimer.milliseconds() >= GATE_OPEN_DWELL_MS) {
-                    startShootPath(paths.SHOOT2, T_SHOOT2);
+                    startShootPath(paths.shoot2, T_SHOOT2);
                     currentState = AutoState.SHOOT2_PATH;
                 }
                 break;
@@ -440,7 +389,9 @@ public class PINKxROLLBlue extends OpMode {
 
             case SHOOT2_SPINUP:
                 intake.setMode(Intake.Mode.INTAKE);
-                if (spinupTimer.seconds() >= SPINUP_DURATION) {
+                alignTimer.reset();
+                if (spinupTimer.seconds() >= SPINUP_DURATION
+                        && (isAligned() || alignTimer.seconds() >= ALIGN_TIMEOUT_S)) {
                     shootTimer.reset();
                     intake.setMode(Intake.Mode.SHOOT);
                     currentState = AutoState.SHOOT2;
@@ -452,18 +403,18 @@ public class PINKxROLLBlue extends OpMode {
                 if (shootTimer.seconds() >= SHOOT_DURATION) {
                     setPreShootRPM(SHOOT_3_RPM);
                     intake.setMode(Intake.Mode.INTAKE);
-                    startIntakePath(paths.INTAKEPOS3, T_INTAKEPOS3);
+                    startIntakePath(paths.intakepos3, T_INTAKEPOS3);
                     currentState = AutoState.INTAKEPOS3;
                 }
                 break;
 
             // -----------------------------------------------------------------
-            // CYCLE 3 — long transit to Y~36 row → straight intake → shoot
+            // CYCLE 3
             // -----------------------------------------------------------------
             case INTAKEPOS3:
                 intake.setMode(Intake.Mode.INTAKE);
                 if (pathDone()) {
-                    startIntakePath(paths.INTAKE3, T_INTAKE3);
+                    startIntakePath(paths.intake3, T_INTAKE3);
                     currentState = AutoState.INTAKE3;
                 }
                 break;
@@ -471,15 +422,7 @@ public class PINKxROLLBlue extends OpMode {
             case INTAKE3:
                 intake.setMode(Intake.Mode.INTAKE);
                 if (pathDone()) {
-                    intakeEndTimer.reset();
-                    currentState = AutoState.INTAKE3_DWELL;
-                }
-                break;
-
-            case INTAKE3_DWELL:
-                intake.setMode(Intake.Mode.INTAKE);
-                if (intakeEndTimer.milliseconds() >= INTAKE_END_DWELL_MS) {
-                    startShootPath(paths.SHOOT3, T_SHOOT3);
+                    startShootPath(paths.shoot3, T_SHOOT3);
                     currentState = AutoState.SHOOT3_PATH;
                 }
                 break;
@@ -494,7 +437,9 @@ public class PINKxROLLBlue extends OpMode {
 
             case SHOOT3_SPINUP:
                 intake.setMode(Intake.Mode.INTAKE);
-                if (spinupTimer.seconds() >= SPINUP_DURATION) {
+                alignTimer.reset();
+                if (spinupTimer.seconds() >= SPINUP_DURATION
+                        && (isAligned() || alignTimer.seconds() >= ALIGN_TIMEOUT_S)) {
                     shootTimer.reset();
                     intake.setMode(Intake.Mode.SHOOT);
                     currentState = AutoState.SHOOT3;
@@ -505,6 +450,17 @@ public class PINKxROLLBlue extends OpMode {
                 intake.setMode(Intake.Mode.SHOOT);
                 if (shootTimer.seconds() >= SHOOT_DURATION) {
                     intake.setMode(Intake.Mode.INTAKE);
+                    startIntakePath(paths.leave, T_LEAVE);
+                    currentState = AutoState.LEAVE;
+                }
+                break;
+
+            // -----------------------------------------------------------------
+            // LEAVE
+            // -----------------------------------------------------------------
+            case LEAVE:
+                intake.setMode(Intake.Mode.INTAKE);
+                if (pathDone()) {
                     currentState = AutoState.DONE;
                 }
                 break;
@@ -516,152 +472,140 @@ public class PINKxROLLBlue extends OpMode {
     }
 
     // =====================================================================
-    //  PATHS  (Blue-side — doc 10)
+    //  PATHS  (Blue-side coordinates — doc 8)
     // =====================================================================
     public static class Paths {
-        public PathChain SHOOT0;
-        public PathChain INTAKEPOS1;
-        public PathChain INTAKE1;
-        public PathChain GATEPOS;
-        public PathChain GATEOPEN;
-        public PathChain SHOOT1;
-        public PathChain INTAKEPOS2;
-        public PathChain INTAKE2;
-        public PathChain GATEPOS2;
-        public PathChain GATEOPEN2;
-        public PathChain SHOOT2;
-        public PathChain INTAKEPOS3;
-        public PathChain INTAKE3;
-        public PathChain SHOOT3;
+        public PathChain shoot0;
+        public PathChain intakepos1;
+        public PathChain intake1;
+        public PathChain gatepos;
+        public PathChain gateopen;
+        public PathChain shoot1;
+        public PathChain intakepos2;
+        public PathChain intake2;
+        public PathChain shoot2;
+        public PathChain intakepos3;
+        public PathChain intake3;
+        public PathChain shoot3;
+        public PathChain leave;
 
         public Paths(Follower follower) {
 
-            // (25.526,129.737,144°) → (53.789,87,134°)
-            SHOOT0 = follower.pathBuilder()
+            // (35,137,180°) → (55,84,130°)
+            shoot0 = follower.pathBuilder()
                     .addPath(new BezierLine(
-                            new Pose(25.526, 129.737),
-                            new Pose(53.789,  87.000)
+                            new Pose(35.000, 137.000),
+                            new Pose(55.000,  84.000)
                     ))
-                    .setLinearHeadingInterpolation(Math.toRadians(144), Math.toRadians(134))
+                    .setLinearHeadingInterpolation(Math.toRadians(180), Math.toRadians(130))
                     .build();
 
-            // (53.789,87,134°) → (43.789,84.105,180°)
-            INTAKEPOS1 = follower.pathBuilder()
+            // (55,84,130°) → (45.526,84.158,180°)
+            intakepos1 = follower.pathBuilder()
                     .addPath(new BezierLine(
-                            new Pose(53.789, 87.000),
-                            new Pose(43.789, 84.105)
+                            new Pose(55.000,  84.000),
+                            new Pose(45.526,  84.158)
                     ))
-                    .setLinearHeadingInterpolation(Math.toRadians(134), Math.toRadians(180))
+                    .setLinearHeadingInterpolation(Math.toRadians(130), Math.toRadians(180))
                     .build();
 
-            // (43.789,84.105,180°) → (15.737,84,180°)
-            INTAKE1 = follower.pathBuilder()
+            // (45.526,84.158,180°) → (19.579,84.421,180°)
+            intake1 = follower.pathBuilder()
                     .addPath(new BezierLine(
-                            new Pose(43.789, 84.105),
-                            new Pose(15.737, 84.000)
+                            new Pose(45.526, 84.158),
+                            new Pose(19.579, 84.421)
                     ))
-                    .setLinearHeadingInterpolation(Math.toRadians(180), Math.toRadians(180))
+                    .setConstantHeadingInterpolation(Math.toRadians(180))
                     .build();
 
-            // (15.737,84,180°) → curve → (19.789,75.053,90°)
-            GATEPOS = follower.pathBuilder()
-                    .addPath(new BezierCurve(
-                            new Pose(15.737, 84.000),
-                            new Pose(27.289, 80.000),
-                            new Pose(19.789, 75.053)
-                    ))
-                    .setLinearHeadingInterpolation(Math.toRadians(180), Math.toRadians(90))
-                    .build();
-
-            // (19.789,75.053,90°) → (14.474,75.053,90°)
-            GATEOPEN = follower.pathBuilder()
+            // (19.579,84.421,180°) → (25.447,74.737,180°)
+            gatepos = follower.pathBuilder()
                     .addPath(new BezierLine(
-                            new Pose(19.789, 75.053),
-                            new Pose(14.474, 75.053)
+                            new Pose(19.579, 84.421),
+                            new Pose(25.447, 77.737)
                     ))
-                    .setLinearHeadingInterpolation(Math.toRadians(90), Math.toRadians(90))
+                    .setConstantHeadingInterpolation(Math.toRadians(180))
                     .build();
 
-            // (14.474,75.053,90°) → (53.684,86.947,134°)
-            SHOOT1 = follower.pathBuilder()
+            // (25.447,74.737,180°) → (15.671,74.711,180°)
+            gateopen = follower.pathBuilder()
                     .addPath(new BezierLine(
-                            new Pose(14.474, 75.053),
-                            new Pose(53.684, 86.947)
+                            new Pose(25.447, 77.737),
+                            new Pose(19.671, 77.711)
                     ))
-                    .setLinearHeadingInterpolation(Math.toRadians(90), Math.toRadians(134))
+                    .setConstantHeadingInterpolation(Math.toRadians(180))
                     .build();
 
-            // (53.684,86.947,134°) → (45.789,60.421,180°)
-            INTAKEPOS2 = follower.pathBuilder()
+            // (15.671,74.711,180°) → (55,84,130°)
+            shoot1 = follower.pathBuilder()
                     .addPath(new BezierLine(
-                            new Pose(53.684, 86.947),
-                            new Pose(45.789, 60.421)
+                            new Pose(19.671, 77.711),
+                            new Pose(55.000,  84.000)
                     ))
-                    .setLinearHeadingInterpolation(Math.toRadians(134), Math.toRadians(180))
+                    .setLinearHeadingInterpolation(Math.toRadians(180), Math.toRadians(130))
                     .build();
 
-            // (45.789,60.421,180°) → (15.895,60.579,180°)
-            INTAKE2 = follower.pathBuilder()
+            // (55,84,130°) → (48.158,59.263,180°)
+            intakepos2 = follower.pathBuilder()
                     .addPath(new BezierLine(
-                            new Pose(45.789, 60.421),
-                            new Pose(15.895, 60.579)
+                            new Pose(55.000, 84.000),
+                            new Pose(48.158, 59.263)
                     ))
-                    .setLinearHeadingInterpolation(Math.toRadians(180), Math.toRadians(180))
+                    .setLinearHeadingInterpolation(Math.toRadians(130), Math.toRadians(180))
                     .build();
 
-            // (15.895,60.579,180°) → curve → (22,71.263,90°)
-            GATEPOS2 = follower.pathBuilder()
-                    .addPath(new BezierCurve(
-                            new Pose(15.895, 60.579),
-                            new Pose(26.105, 54.026),
-                            new Pose(22.000, 71.263)
-                    ))
-                    .setLinearHeadingInterpolation(Math.toRadians(180), Math.toRadians(90))
-                    .build();
-
-            // (22,71.263,90°) → (15.474,71,90°)
-            GATEOPEN2 = follower.pathBuilder()
+            // (48.158,59.263,180°) → (16.895,59.842,180°)
+            intake2 = follower.pathBuilder()
                     .addPath(new BezierLine(
-                            new Pose(22.000, 71.263),
-                            new Pose(15.474, 71.000)
+                            new Pose(48.158, 59.263),
+                            new Pose(16.895, 59.842)
                     ))
-                    .setLinearHeadingInterpolation(Math.toRadians(90), Math.toRadians(90))
+                    .setConstantHeadingInterpolation(Math.toRadians(180))
                     .build();
 
-            // (15.474,71,90°) → (53.474,87.053,134°)
-            SHOOT2 = follower.pathBuilder()
+            // (16.895,59.842,180°) → (55,84.105,130°)
+            shoot2 = follower.pathBuilder()
                     .addPath(new BezierLine(
-                            new Pose(15.474, 71.000),
-                            new Pose(53.474, 87.053)
+                            new Pose(16.895, 59.842),
+                            new Pose(55.000,  84.105)
                     ))
-                    .setLinearHeadingInterpolation(Math.toRadians(90), Math.toRadians(134))
+                    .setLinearHeadingInterpolation(Math.toRadians(180), Math.toRadians(130))
                     .build();
 
-            // (53.474,87.053,134°) → (35.895,36.158,180°)
-            INTAKEPOS3 = follower.pathBuilder()
+            // (55,84.105,130°) → (47.368,35.579,180°)
+            intakepos3 = follower.pathBuilder()
                     .addPath(new BezierLine(
-                            new Pose(53.474, 87.053),
-                            new Pose(35.895, 36.158)
+                            new Pose(55.000,  84.105),
+                            new Pose(47.368,  35.579)
                     ))
-                    .setLinearHeadingInterpolation(Math.toRadians(134), Math.toRadians(180))
+                    .setLinearHeadingInterpolation(Math.toRadians(130), Math.toRadians(180))
                     .build();
 
-            // (35.895,36.158,180°) → (9.263,36.368,180°)
-            INTAKE3 = follower.pathBuilder()
+            // (47.368,35.579,180°) → (18.263,35.947,180°)
+            intake3 = follower.pathBuilder()
                     .addPath(new BezierLine(
-                            new Pose(35.895, 36.158),
-                            new Pose(9.263,  36.368)
+                            new Pose(47.368, 35.579),
+                            new Pose(18.263, 35.947)
                     ))
-                    .setLinearHeadingInterpolation(Math.toRadians(180), Math.toRadians(180))
+                    .setConstantHeadingInterpolation(Math.toRadians(180))
                     .build();
 
-            // (9.263,36.368,180°) → (58.105,102.105,141°)
-            SHOOT3 = follower.pathBuilder()
+            // (18.263,35.947,180°) → (55.105,84.421,130°)
+            shoot3 = follower.pathBuilder()
                     .addPath(new BezierLine(
-                            new Pose(9.263,   36.368),
-                            new Pose(58.105, 102.105)
+                            new Pose(18.263, 35.947),
+                            new Pose(55.105, 84.421)
                     ))
-                    .setLinearHeadingInterpolation(Math.toRadians(180), Math.toRadians(141))
+                    .setLinearHeadingInterpolation(Math.toRadians(180), Math.toRadians(130))
+                    .build();
+
+            // (55.105,84.421,130°) → (24.895,68.526,180°)
+            leave = follower.pathBuilder()
+                    .addPath(new BezierLine(
+                            new Pose(55.105, 84.421),
+                            new Pose(24.895, 68.526)
+                    ))
+                    .setLinearHeadingInterpolation(Math.toRadians(130), Math.toRadians(180))
                     .build();
         }
     }

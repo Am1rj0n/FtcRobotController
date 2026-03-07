@@ -17,62 +17,69 @@ public class ShootingWhileMoving {
     // =========================================================================
 
     /**
-     * How far into the future to predict robot position (seconds).
+     * Time (seconds) from shoot command to disc leaving the flywheel.
+     * 3 balls in 1.5s = 0.5s per ball. Transfer time is the mechanical
+     * delay before the disc actually exits.
      *
-     * This is the time from disc leaving the flywheel to crossing the goal.
-     * Measure with slow-motion video: start timing when disc exits the shooter,
-     * stop when it enters the goal opening.
-     *
-     * INCREASE if shots land short (you moved past where you aimed).
-     * DECREASE if shots land long (you're leading too much, correction overshoots).
-     *
-     * Tune in 0.05s steps. Typical FTC range: 0.3 – 0.8s.
+     * INCREASE if shots land behind where you were (you moved past aim point).
+     * DECREASE if shots land in front (overcorrecting).
      */
-    private static final double FLIGHT_TIME_SECONDS = 0.50;
+    private static final double BALL_TRANSFER_TIME = 0.40;
 
     /**
-     * Low-pass filter weight for acceleration smoothing.
+     * Low-pass filter weight for acceleration + omega smoothing.
      *
-     * Acceleration is estimated by finite differencing (velocity delta / dt),
-     * which is noisy — especially at high speed where odometry updates quickly.
-     * The filter blends old accel estimate with new measurement each loop:
+     *   smoothed = ALPHA * old + (1 - ALPHA) * newMeasurement
      *
-     *   smoothedAccel = ACCEL_ALPHA * oldAccel + (1 - ACCEL_ALPHA) * newMeasurement
-     *
-     * ACCEL_ALPHA = 0.0  → no filtering (raw, very noisy at high speed)
-     * ACCEL_ALPHA = 0.8  → strong smoothing (recommended starting point)
-     * ACCEL_ALPHA = 0.95 → very heavy filtering (slow to respond to real accel changes)
-     *
-     * If SWM overcorrects at high speed → increase ACCEL_ALPHA toward 0.9.
-     * If SWM is too slow to respond to direction changes → decrease toward 0.6.
+     * 0.0 = raw/noisy, 0.9 = heavy smoothing. Start at 0.80.
      */
     private static final double ACCEL_ALPHA = 0.80;
 
-    // =========================================================================
-    //  GOAL POSITIONS
-    // =========================================================================
-    private static final double BLUE_GOAL_X = 0.0;
-    private static final double BLUE_GOAL_Y = 144.0;
-    private static final double RED_GOAL_X  = 144.0;
-    private static final double RED_GOAL_Y  = 144.0;
+    /**
+     * Turret physical offset from robot center of rotation (inches, robot frame).
+     * +X = forward on robot, +Y = left on robot.
+     *
+     * HOW TO MEASURE:
+     *   1. Place robot on field, mark center of rotation on the ground
+     *      (spin robot in place — the point that doesn't move is the CoR).
+     *   2. Measure straight-line distance forward/back → X offset.
+     *   3. Measure straight-line distance left/right   → Y offset.
+     *   Set to (0, 0) until you measure it — effect is small at low rotation speed.
+     */
+    private static final double TURRET_OFFSET_X = 0.0;  // TODO: measure
+    private static final double TURRET_OFFSET_Y = 0.0;  // TODO: measure
 
     // =========================================================================
-    //  ACCELERATION TRACKING
+    //  GOAL POSITIONS (inches)
+    // =========================================================================
+    private static final double BLUE_GOAL_X = 7.0;
+    private static final double BLUE_GOAL_Y = 141.0;
+    private static final double RED_GOAL_X  = 134.5;
+    private static final double RED_GOAL_Y  = 140.0;
+
+    // =========================================================================
+    //  VELOCITY TRACKING  (linear + heading for omega estimation)
     // =========================================================================
     private final ElapsedTime accelTimer = new ElapsedTime();
-    private double lastVelX = 0.0;
-    private double lastVelY = 0.0;
+    private double lastVelX    = 0.0;
+    private double lastVelY    = 0.0;
+    private double lastHeading = 0.0;
 
-    // Smoothed (low-pass filtered) acceleration values
+    // Smoothed acceleration
     private double accelX = 0.0;
     private double accelY = 0.0;
+
+    // Smoothed angular velocity (rad/s) — estimated by heading finite-difference
+    private double omega = 0.0;
 
     // =========================================================================
     //  STATE
     // =========================================================================
-    private boolean enabled           = false;
-    private boolean headingLockActive = false;
-    private double  targetHeading     = 0.0;
+    private boolean enabled              = false;
+    private boolean headingLockActive    = false;
+    private double  targetHeading        = 0.0;
+    private double  turretAngularVelocity = 0.0;  // feedforward for turret PD
+    private double  virtualGoalDistance  = 0.0;   // cached for getDistanceForRPM()
 
     // =========================================================================
     //  CONSTRUCTOR
@@ -94,63 +101,137 @@ public class ShootingWhileMoving {
     }
 
     /**
-     * Call every loop. Updates acceleration estimate with low-pass filter,
-     * then computes target heading from predicted future pose.
+     * Call every loop. Updates motion estimates, then runs the iterative
+     * virtual goal solver to find where to aim and how far the disc will travel.
      */
     public void update() {
-        updateAcceleration();
+        updateMotionEstimates();
 
         if (!enabled) {
             headingLockActive = false;
             return;
         }
 
-        Pose   futurePose = getFuturePose();
-        double goalX      = isRed ? RED_GOAL_X : BLUE_GOAL_X;
-        double goalY      = isRed ? RED_GOAL_Y : BLUE_GOAL_Y;
-
-        targetHeading     = Math.atan2(goalY - futurePose.getY(), goalX - futurePose.getX());
+        solveVirtualGoal();
         headingLockActive = true;
     }
 
     // =========================================================================
-    //  ACCELERATION — with low-pass filter
+    //  MOTION ESTIMATES — acceleration (linear) + omega (angular)
     // =========================================================================
 
-    private void updateAcceleration() {
+    private void updateMotionEstimates() {
         double dt = accelTimer.seconds();
-        if (dt < 0.005) return;  // guard against divide-by-zero on first loop
+        if (dt < 0.005) return;
 
-        Vector vel = follower.getVelocity();
-        double vx  = vel.getXComponent();
-        double vy  = vel.getYComponent();
+        Vector vel     = follower.getVelocity();
+        double vx      = vel.getXComponent();
+        double vy      = vel.getYComponent();
+        double heading = follower.getPose().getHeading();
 
-        // Raw acceleration from finite differencing
+        // Linear acceleration — low-pass filtered finite difference
         double rawAccelX = (vx - lastVelX) / dt;
         double rawAccelY = (vy - lastVelY) / dt;
-
-        // Low-pass filter: blend old estimate with new measurement.
-        // This kills the high-frequency noise that spikes at high speed.
         accelX = ACCEL_ALPHA * accelX + (1.0 - ACCEL_ALPHA) * rawAccelX;
         accelY = ACCEL_ALPHA * accelY + (1.0 - ACCEL_ALPHA) * rawAccelY;
 
-        lastVelX = vx;
-        lastVelY = vy;
+        // Angular velocity — heading finite difference, normalized, low-pass filtered
+        double dHeading = heading - lastHeading;
+        // Normalize to (-π, π) to handle wrap-around
+        while (dHeading >  Math.PI) dHeading -= 2 * Math.PI;
+        while (dHeading < -Math.PI) dHeading += 2 * Math.PI;
+        double rawOmega = dHeading / dt;
+        omega = ACCEL_ALPHA * omega + (1.0 - ACCEL_ALPHA) * rawOmega;
+
+        lastVelX    = vx;
+        lastVelY    = vy;
+        lastHeading = heading;
         accelTimer.reset();
     }
 
     // =========================================================================
-    //  PREDICTION — x(t) = x0 + v*t + 0.5*a*t²
+    //  VIRTUAL GOAL SOLVER — 5-iteration convergence
+    //
+    //  Instead of predicting where the robot goes, we shift the goal backwards
+    //  by how far the robot drifts during (BALL_TRANSFER_TIME + flight time).
+    //  The turret aims at this "virtual goal" right now.
+    //
+    //  Each iteration refines the distance estimate → better flight time →
+    //  better virtual goal position. Converges in 3-5 iterations.
     // =========================================================================
 
-    /**
-     * Returns where the robot will be FLIGHT_TIME_SECONDS from now.
-     * Uses smoothed acceleration so high-speed noise doesn't blow up the prediction.
-     */
+    private void solveVirtualGoal() {
+        Pose   robotPose = follower.getPose();
+        Vector vel       = follower.getVelocity();
+        double vx        = vel.getXComponent();
+        double vy        = vel.getYComponent();
+        double heading   = robotPose.getHeading();
+        double goalX     = isRed ? RED_GOAL_X : BLUE_GOAL_X;
+        double goalY     = isRed ? RED_GOAL_Y : BLUE_GOAL_Y;
+
+        // --- Turret position in field frame ---
+        // Rotate robot-frame offset into field frame using current heading
+        double cosH         = Math.cos(heading);
+        double sinH         = Math.sin(heading);
+        double turretFieldX = robotPose.getX() + (TURRET_OFFSET_X * cosH - TURRET_OFFSET_Y * sinH);
+        double turretFieldY = robotPose.getY() + (TURRET_OFFSET_X * sinH + TURRET_OFFSET_Y * cosH);
+
+        // --- Effective turret velocity (robot linear + tangential from rotation) ---
+        // Tangential velocity due to robot spinning: v_tan = omega × r (cross product)
+        // offset in field frame: (offsetFieldX, offsetFieldY)
+        double offsetFieldX = turretFieldX - robotPose.getX();
+        double offsetFieldY = turretFieldY - robotPose.getY();
+        double turretVx     = vx + (-omega * offsetFieldY);  // -ω × r_y
+        double turretVy     = vy + ( omega * offsetFieldX);  //  ω × r_x
+
+        // --- Iterative virtual goal ---
+        double virtualGoalX = goalX;
+        double virtualGoalY = goalY;
+        double distInches   = Math.hypot(goalX - turretFieldX, goalY - turretFieldY);
+
+        for (int i = 0; i < 5; i++) {
+            double distMeters  = distInches * 0.0254;
+            double rpmForDist  = shooter.getRPMForShot(distMeters);
+            // Convert RPM to surface speed (inches/sec). Flywheel radius ≈ 1.5 in.
+            // v_surface = RPM * 2π * r / 60
+            double shotVelIps  = rpmForDist * (2.0 * Math.PI * 1.5) / 60.0;
+
+            double flightTime  = (shotVelIps > 0.1) ? (distInches / shotVelIps) : 0.0;
+            double totalDrift  = BALL_TRANSFER_TIME + flightTime;
+
+            // Shift goal backwards by how far the turret drifts during total drift time
+            virtualGoalX = goalX - turretVx * totalDrift;
+            virtualGoalY = goalY - turretVy * totalDrift;
+            distInches   = Math.hypot(virtualGoalX - turretFieldX, virtualGoalY - turretFieldY);
+        }
+
+        // --- Target heading = angle from turret to virtual goal ---
+        double dx = virtualGoalX - turretFieldX;
+        double dy = virtualGoalY - turretFieldY;
+        targetHeading       = Math.atan2(dy, dx);
+        virtualGoalDistance = distInches * 0.0254;  // store in meters for RPM lookup
+
+        // --- Turret angular velocity feedforward ---
+        // How fast the line-of-sight to virtual goal is rotating
+        double distSq = dx * dx + dy * dy;
+        if (distSq > 0.1) {
+            // ω_los = (v_y * dx - v_x * dy) / dist²   (cross product / dist²)
+            double omegaLOS    = (turretVy * dx - turretVx * dy) / distSq;
+            turretAngularVelocity = omegaLOS - omega;  // subtract robot rotation → turret-relative
+        } else {
+            turretAngularVelocity = 0.0;
+        }
+    }
+
+    // =========================================================================
+    //  FUTURE POSE — kept for telemetry / turret teleop compatibility
+    //  Now uses the virtual goal drift time rather than raw FLIGHT_TIME_SECONDS
+    // =========================================================================
+
     public Pose getFuturePose() {
         Pose   current = follower.getPose();
         Vector vel     = follower.getVelocity();
-        double t       = FLIGHT_TIME_SECONDS;
+        double t       = BALL_TRANSFER_TIME + 0.35;  // approx total drift for display
 
         return new Pose(
                 current.getX() + (vel.getXComponent() * t) + (0.5 * accelX * t * t),
@@ -160,14 +241,15 @@ public class ShootingWhileMoving {
     }
 
     // =========================================================================
-    //  DISTANCE — uses future pose when SWM on, current pose when off
+    //  DISTANCE — virtual goal distance when SWM on, real distance when off
     // =========================================================================
 
     public double getDistanceForRPM() {
-        Pose   pose  = enabled ? getFuturePose() : follower.getPose();
+        if (enabled) return virtualGoalDistance;
+        Pose   pose  = follower.getPose();
         double goalX = isRed ? RED_GOAL_X : BLUE_GOAL_X;
         double goalY = isRed ? RED_GOAL_Y : BLUE_GOAL_Y;
-        return Math.hypot(goalX - pose.getX(), goalY - pose.getY());
+        return Math.hypot(goalX - pose.getX(), goalY - pose.getY()) * 0.0254;
     }
 
     // =========================================================================
@@ -176,20 +258,20 @@ public class ShootingWhileMoving {
 
     public boolean isReadyToShoot() {
         if (!enabled) return false;
-        boolean shooterReady = shooter.isAtSpeed();
-        boolean turretReady  = (turret == null) || turret.isAligned();
-        return shooterReady && turretReady;
+        return shooter.isAtSpeed() && ((turret == null) || turret.isAligned());
     }
 
     // =========================================================================
-    //  GETTERS
+    //  GETTERS — all same names as before, plus turretAngularVelocity
     // =========================================================================
 
-    public boolean isEnabled()           { return enabled; }
-    public boolean isHeadingLockActive() { return headingLockActive; }
-    public double  getTargetHeading()    { return targetHeading; }
-    public double  getAccelX()           { return accelX; }
-    public double  getAccelY()           { return accelY; }
+    public boolean isEnabled()              { return enabled; }
+    public boolean isHeadingLockActive()    { return headingLockActive; }
+    public double  getTargetHeading()       { return targetHeading; }
+    public double  getAccelX()              { return accelX; }
+    public double  getAccelY()              { return accelY; }
+    public double  getOmega()               { return omega; }
+    public double  getTurretAngularVelocity() { return turretAngularVelocity; }
 
     public double getVelocityMagnitude() {
         Vector vel = follower.getVelocity();

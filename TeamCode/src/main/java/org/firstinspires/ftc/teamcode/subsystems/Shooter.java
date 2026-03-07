@@ -35,9 +35,8 @@ public class Shooter {
     private static final double TICKS_PER_REV = 28.0;
     private static final double AT_SPEED_TOL  = 100.0;
 
-    private static final double CLOSE_RPM = 2900.0;
-
-    private static final double FAR_RPM   = 3800.0;
+    private static final double CLOSE_RPM = 3000.0;
+    private static final double FAR_RPM   = 3850.0;
 
     private final ElapsedTime loopTimer = new ElapsedTime();
     private double runMs           = 0;
@@ -92,8 +91,36 @@ public class Shooter {
         runMs = loopTimer.milliseconds();
     }
 
+   //INTERPOLATION
+    private static final double[][] RPM_TABLE = {
+            { 1.59258, 3000 },
+            { 1.78562, 3100 },
+            { 2.00914, 3200 },
+            { 2.286,   3300 },
+            { 2.52984, 3350 },
+            { 2.794,   3350 },
+            { 3.24612, 3900 },
+            { 3.4671,  3950 },
+            { 3.7465,  4100 },
+            { 3.8862,  4150 },
+    };
+
     public double getRPMForShot(double meters) {
-        return (445.72369 * meters) + 2497.95455;
+        // Below first entry — hold first value
+        if (meters <= RPM_TABLE[0][0]) return RPM_TABLE[0][1];
+        // Above last entry — hold last value
+        if (meters >= RPM_TABLE[RPM_TABLE.length - 1][0]) return RPM_TABLE[RPM_TABLE.length - 1][1];
+        // Find the surrounding bracket and interpolate
+        for (int i = 0; i < RPM_TABLE.length - 1; i++) {
+            double x0 = RPM_TABLE[i][0],     y0 = RPM_TABLE[i][1];
+            double x1 = RPM_TABLE[i + 1][0], y1 = RPM_TABLE[i + 1][1];
+            if (meters <= x1) {
+                double t = (meters - x0) / (x1 - x0);
+                return y0 + t * (y1 - y0);
+            }
+        }
+        // Should never reach here
+        return RPM_TABLE[RPM_TABLE.length - 1][1];
     }
 
     public void setRPMForDistance(double meters) {
@@ -191,7 +218,6 @@ public class Shooter {
                 targetRPM,
                 readRPM,
                 isAtSpeed() ? "✓" : "...",
-                runMs
-        );
+                runMs);
     }
 }
