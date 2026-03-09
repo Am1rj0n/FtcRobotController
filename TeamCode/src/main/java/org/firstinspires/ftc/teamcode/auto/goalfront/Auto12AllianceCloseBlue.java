@@ -27,7 +27,7 @@ import com.pedropathing.paths.PathChain;
  * Mirror of Auto12AllianceCloseRed: x_blue = 144 - x_red, headings reflected.
  * Starts at (28.211, 132.895, 143deg). 3 intake/shoot cycles each preceded by a gate open.
  */
-@Autonomous(name = "PDxRL 12 ball close blue", group = "PDxRL")
+@Autonomous(name = "PDxRL 12 ball close blue (goal)", group = "PDxRL")
 @Configurable
 public class Auto12AllianceCloseBlue extends OpMode {
 
@@ -48,10 +48,10 @@ public class Auto12AllianceCloseBlue extends OpMode {
     // =========================================================================
     //  SHOOTER RPMs
     // =========================================================================
-    private static final double SHOOT_0_RPM = 3150.0;
-    private static final double SHOOT_1_RPM = 3150.0;
-    private static final double SHOOT_2_RPM = 3150.0;
-    private static final double SHOOT_3_RPM = 3150.0;
+    private static final double SHOOT_0_RPM = 3200.0;
+    private static final double SHOOT_1_RPM = 3200.0;
+    private static final double SHOOT_2_RPM = 3200.0;
+    private static final double SHOOT_3_RPM = 3200.0;
 
     // =========================================================================
     //  TIMING CONSTANTS

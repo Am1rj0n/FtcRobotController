@@ -1,4 +1,6 @@
-package org.firstinspires.ftc.teamcode.auto.goalfront;
+package org.firstinspires.ftc.teamcode.auto.closewall;
+
+
 
 import com.qualcomm.robotcore.eventloop.opmode.Autonomous;
 import com.qualcomm.robotcore.eventloop.opmode.OpMode;
@@ -23,18 +25,27 @@ import com.pedropathing.geometry.Pose;
 import com.pedropathing.paths.PathChain;
 
 /**
- * Auto12AllianceCloseRed — 12-ball alliance close-side autonomous, RED.
- * Starts at (28.211, 132.895, 143deg). 3 intake/shoot cycles each preceded by a gate open.
- * NOTE: Doc 6 had duplicate Java field names "gateopen" — renamed gateopen1/2/3 here.
+ * Auto12AllianceCloseRedV2 — PDxRD V2
+ * 12-ball alliance close-side autonomous, RED.
+ * Starts at (109, 137, 0°).
+ *
+ * Run order:
+ *   INITIAL_SPINUP
+ *   → SHOOT0 (preload)
+ *   → INTAKEPOS1 → INTAKE1 → GATEPOS1 → GATEOPEN1 → SHOOT1
+ *   → INTAKEPOS2 → INTAKE2 → SHOOT2          (no gate for cycle 2)
+ *   → GATEPOS3   → GATEOPEN3
+ *   → INTAKE3 → INTAKE3_RETRY → SHOOT3
+ *   → LEAVE → DONE
  */
-@Autonomous(name = "PDxRD 12 ball close red (goal)", group = "PDxRD")
+@Autonomous(name = "PDxRD V2 12 ball close red (wall)", group = "PDxRD")
 @Configurable
-public class Auto12AllianceCloseRed extends OpMode {
+public class Auto12AllianceCloseRedV2 extends OpMode {
 
     private static final boolean IS_RED = true;
 
     private static final double GOAL_X = 144.0;
-    private static final double GOAL_Y  = 144.0;
+    private static final double GOAL_Y = 144.0;
 
     // =========================================================================
     //  TURRET CONSTANTS
@@ -48,7 +59,7 @@ public class Auto12AllianceCloseRed extends OpMode {
     // =========================================================================
     //  SHOOTER RPMs
     // =========================================================================
-    private static final double SHOOT_0_RPM = 3150.0;   // close preset
+    private static final double SHOOT_0_RPM = 3150.0;
     private static final double SHOOT_1_RPM = 3150.0;
     private static final double SHOOT_2_RPM = 3150.0;
     private static final double SHOOT_3_RPM = 3150.0;
@@ -57,34 +68,39 @@ public class Auto12AllianceCloseRed extends OpMode {
     //  TIMING CONSTANTS
     // =========================================================================
     private static final double INITIAL_SPINUP_S    = 1.0;
-    private static final double SPINUP_MS            = 50.0;
-    private static final double SHOOT_MS             = 1500.0;
+    private static final double SPINUP_MS           = 50.0;
+    private static final double SHOOT_MS            = 1500.0;
     /** Max time to wait for alignment before shooting anyway. */
-    private static final double ALIGN_TIMEOUT_S        = 1.0;
-    private static final double INTAKE_END_DWELL_MS  = 120.0;
-    /** Pause after gate-open path completes before sweeping inward. */
-    private static final double GATE_OPEN_DWELL_MS   = 120.0;
+    private static final double ALIGN_TIMEOUT_S     = 1.0;
+    private static final double INTAKE_END_DWELL_MS = 120.0;
+    /** Pause after gate-open path completes before continuing. */
+    private static final double GATE_OPEN_DWELL_MS  = 120.0;
 
     // =========================================================================
     //  PATH SPEEDS
     // =========================================================================
-    private static final double SHOOT_PATH_SPEED    = 0.9;
-    private static final double INTAKE_PATH_SPEED   = 0.85;
-    private static final double GATE_OPEN_SPEED     = 0.8;   // slower for gate push
+    private static final double SHOOT_PATH_SPEED  = 0.9;
+    private static final double INTAKE_PATH_SPEED = 0.85;
+    private static final double GATE_OPEN_SPEED   = 0.8;
 
     // =========================================================================
     //  PER-PATH TIMEOUTS (seconds)
     // =========================================================================
-    private static final double T_SHOOT0    = 4.0;
-    private static final double T_INTAKE1   = 3.5;
-    private static final double T_GATEOPEN1 = 2.0;
-    private static final double T_SHOOT1    = 3.0;
-    private static final double T_INTAKE2   = 4.0;
-    private static final double T_GATEOPEN2 = 2.0;
-    private static final double T_SHOOT2    = 3.0;
-    private static final double T_INTAKE3   = 4.0;
-    private static final double T_GATEOPEN3 = 2.0;
-    private static final double T_SHOOT3    = 3.0;
+    private static final double T_SHOOT0       = 4.0;
+    private static final double T_INTAKEPOS1   = 2.0;
+    private static final double T_INTAKE1      = 3.0;
+    private static final double T_GATEPOS1     = 2.0;
+    private static final double T_GATEOPEN1    = 2.0;
+    private static final double T_SHOOT1       = 3.0;
+    private static final double T_INTAKEPOS2   = 2.0;
+    private static final double T_INTAKE2      = 3.0;
+    private static final double T_SHOOT2       = 3.0;
+    private static final double T_GATEPOS3     = 2.0;
+    private static final double T_GATEOPEN3    = 2.0;
+    private static final double T_INTAKE3      = 3.0;
+    private static final double T_INTAKE3RETRY = 3.0;
+    private static final double T_SHOOT3       = 3.0;
+    private static final double T_LEAVE        = 2.0;
 
     // =========================================================================
     //  HARDWARE
@@ -102,7 +118,7 @@ public class Auto12AllianceCloseRed extends OpMode {
     //  TIMERS
     // =========================================================================
     private final ElapsedTime pathTimer      = new ElapsedTime();
-    private final ElapsedTime alignTimer    = new ElapsedTime();
+    private final ElapsedTime alignTimer     = new ElapsedTime();
     private final ElapsedTime spinupTimer    = new ElapsedTime();
     private final ElapsedTime shootTimer     = new ElapsedTime();
     private final ElapsedTime intakeEndTimer = new ElapsedTime();
@@ -122,20 +138,28 @@ public class Auto12AllianceCloseRed extends OpMode {
     // =========================================================================
     private enum AutoState {
         INITIAL_SPINUP,
-        // Preload shoot
         SHOOT0_PATH, SHOOT0_SPINUP, SHOOT0_FIRING,
-        // Cycle 1: intake → gate → shoot
+
+        // ── Cycle 1: intakepos → intake → gatepos → gateopen → shoot ─────────
+        INTAKEPOS1_PATH,
         INTAKE1_PATH, INTAKE1_DWELL,
+        GATEPOS1_PATH,
         GATEOPEN1_PATH, GATEOPEN1_DWELL,
         SHOOT1_PATH, SHOOT1_SPINUP, SHOOT1_FIRING,
-        // Cycle 2
+
+        // ── Cycle 2: intakepos → intake → shoot (no gate) ────────────────────
+        INTAKEPOS2_PATH,
         INTAKE2_PATH, INTAKE2_DWELL,
-        GATEOPEN2_PATH, GATEOPEN2_DWELL,
         SHOOT2_PATH, SHOOT2_SPINUP, SHOOT2_FIRING,
-        // Cycle 3
-        INTAKE3_PATH, INTAKE3_DWELL,
+
+        // ── Cycle 3: gatepos → gateopen → intake → retry → shoot ─────────────
+        GATEPOS3_PATH,
         GATEOPEN3_PATH, GATEOPEN3_DWELL,
+        INTAKE3_PATH, INTAKE3_DWELL,
+        INTAKE3RETRY_PATH, INTAKE3RETRY_DWELL,
         SHOOT3_PATH, SHOOT3_SPINUP, SHOOT3_FIRING,
+
+        LEAVE,
         DONE
     }
     private AutoState state = AutoState.INITIAL_SPINUP;
@@ -147,14 +171,14 @@ public class Auto12AllianceCloseRed extends OpMode {
     public void init() {
         panelsTelemetry = PanelsTelemetry.INSTANCE.getTelemetry();
         follower = Constants.createFollower(hardwareMap);
-        follower.setStartingPose(new Pose(115.789, 132.895, Math.toRadians(37)));
+        follower.setStartingPose(new Pose(109.000, 137.000, Math.toRadians(0)));
         limelight = new Limelight(hardwareMap, IS_RED);
         intake    = new Intake(hardwareMap);
         shooter   = new Shooter(hardwareMap);
         turret    = new Turret(hardwareMap, limelight, IS_RED);
         lights    = new Lights(hardwareMap);
         paths     = new Paths(follower);
-        panelsTelemetry.debug("Status", "Auto 12 Alliance Close Red - Ready");
+        panelsTelemetry.debug("Status", "PDxRD V2 - Ready");
         panelsTelemetry.update(telemetry);
     }
 
@@ -178,9 +202,10 @@ public class Auto12AllianceCloseRed extends OpMode {
         shooter.periodic();
         turret.update(follower.getPose());
         updateTurretOdom();
-        lights.update(shooter.isActive(), shooter.getRPMMode(), isAligned());
+        lights.update(shooter.isActive(), shooter.getRPMMode(), isAligned(), 0);
         autonomousUpdate();
         AutoToTeleTransfer.finalPose = follower.getPose();
+
         panelsTelemetry.debug("State",        state.name());
         panelsTelemetry.debug("T",            String.format(Locale.US, "%.3f", follower.getCurrentTValue()));
         panelsTelemetry.debug("PathTimer",    String.format(Locale.US, "%.2f / %.1f", pathTimer.seconds(), currentPathTimeout));
@@ -199,7 +224,9 @@ public class Auto12AllianceCloseRed extends OpMode {
 
     @Override
     public void stop() {
-        shooter.stop(); intake.stop(); lights.off();
+        shooter.stop();
+        intake.stop();
+        lights.off();
         AutoToTeleTransfer.finalPose = follower.getPose();
     }
 
@@ -239,6 +266,10 @@ public class Auto12AllianceCloseRed extends OpMode {
         return Math.abs(desired - servoToAngle(turretServoPos)) < TURRET_ALIGN_TOLERANCE;
     }
 
+    private boolean isAligned() {
+        return isTurretAligned() || shooter.isAtSpeed();
+    }
+
     // =========================================================================
     //  PATH HELPERS
     // =========================================================================
@@ -252,17 +283,15 @@ public class Auto12AllianceCloseRed extends OpMode {
     // =========================================================================
     //  STATE MACHINE
     // =========================================================================
-
-    private boolean isAligned() {
-        return isTurretAligned() || shooter.isAtSpeed();
-    }
     private void autonomousUpdate() {
         switch (state) {
 
+            // ── INITIAL SPINUP ────────────────────────────────────────────────
             case INITIAL_SPINUP:
                 intake.setMode(Intake.Mode.INTAKE);
                 if (spinupTimer.seconds() >= INITIAL_SPINUP_S) {
-                    followShoot(paths.shoot0, T_SHOOT0); state = AutoState.SHOOT0_PATH;
+                    followShoot(paths.shoot0, T_SHOOT0);
+                    state = AutoState.SHOOT0_PATH;
                 }
                 break;
 
@@ -276,7 +305,9 @@ public class Auto12AllianceCloseRed extends OpMode {
                 alignTimer.reset();
                 if (spinupTimer.milliseconds() >= SPINUP_MS
                         && (isAligned() || alignTimer.seconds() >= ALIGN_TIMEOUT_S)) {
-                    intake.setMode(Intake.Mode.SHOOT); shootTimer.reset(); state = AutoState.SHOOT0_FIRING;
+                    intake.setMode(Intake.Mode.SHOOT);
+                    shootTimer.reset();
+                    state = AutoState.SHOOT0_FIRING;
                 }
                 break;
 
@@ -285,12 +316,20 @@ public class Auto12AllianceCloseRed extends OpMode {
                 if (shootTimer.milliseconds() >= SHOOT_MS) {
                     shooter.setTargetRPM(SHOOT_1_RPM);
                     intake.setMode(Intake.Mode.INTAKE);
+                    followIntake(paths.intakepos1, T_INTAKEPOS1);
+                    state = AutoState.INTAKEPOS1_PATH;
+                }
+                break;
+
+            // ── CYCLE 1: intakepos → intake → gatepos → gateopen → shoot ─────
+            case INTAKEPOS1_PATH:
+                intake.setMode(Intake.Mode.INTAKE);
+                if (pathDone()) {
                     followIntake(paths.intake1, T_INTAKE1);
                     state = AutoState.INTAKE1_PATH;
                 }
                 break;
 
-            // ── CYCLE 1 ──────────────────────────────────────────────────────
             case INTAKE1_PATH:
                 intake.setMode(Intake.Mode.INTAKE);
                 if (pathDone()) { intakeEndTimer.reset(); state = AutoState.INTAKE1_DWELL; }
@@ -299,7 +338,16 @@ public class Auto12AllianceCloseRed extends OpMode {
             case INTAKE1_DWELL:
                 intake.setMode(Intake.Mode.INTAKE);
                 if (intakeEndTimer.milliseconds() >= INTAKE_END_DWELL_MS) {
-                    followGateOpen(paths.gateopen1, T_GATEOPEN1); state = AutoState.GATEOPEN1_PATH;
+                    followGateOpen(paths.gatepos1, T_GATEPOS1);
+                    state = AutoState.GATEPOS1_PATH;
+                }
+                break;
+
+            case GATEPOS1_PATH:
+                intake.setMode(Intake.Mode.INTAKE);
+                if (pathDone()) {
+                    followGateOpen(paths.gateopen1, T_GATEOPEN1);
+                    state = AutoState.GATEOPEN1_PATH;
                 }
                 break;
 
@@ -315,7 +363,8 @@ public class Auto12AllianceCloseRed extends OpMode {
             case GATEOPEN1_DWELL:
                 intake.setMode(Intake.Mode.INTAKE);
                 if (gateOpenTimer.milliseconds() >= GATE_OPEN_DWELL_MS) {
-                    followShoot(paths.shoot1, T_SHOOT1); state = AutoState.SHOOT1_PATH;
+                    followShoot(paths.shoot1, T_SHOOT1);
+                    state = AutoState.SHOOT1_PATH;
                 }
                 break;
 
@@ -329,7 +378,9 @@ public class Auto12AllianceCloseRed extends OpMode {
                 alignTimer.reset();
                 if (spinupTimer.milliseconds() >= SPINUP_MS
                         && (isAligned() || alignTimer.seconds() >= ALIGN_TIMEOUT_S)) {
-                    intake.setMode(Intake.Mode.SHOOT); shootTimer.reset(); state = AutoState.SHOOT1_FIRING;
+                    intake.setMode(Intake.Mode.SHOOT);
+                    shootTimer.reset();
+                    state = AutoState.SHOOT1_FIRING;
                 }
                 break;
 
@@ -338,12 +389,20 @@ public class Auto12AllianceCloseRed extends OpMode {
                 if (shootTimer.milliseconds() >= SHOOT_MS) {
                     shooter.setTargetRPM(SHOOT_2_RPM);
                     intake.setMode(Intake.Mode.INTAKE);
+                    followIntake(paths.intakepos2, T_INTAKEPOS2);
+                    state = AutoState.INTAKEPOS2_PATH;
+                }
+                break;
+
+            // ── CYCLE 2: intakepos → intake → shoot (no gate) ────────────────
+            case INTAKEPOS2_PATH:
+                intake.setMode(Intake.Mode.INTAKE);
+                if (pathDone()) {
                     followIntake(paths.intake2, T_INTAKE2);
                     state = AutoState.INTAKE2_PATH;
                 }
                 break;
 
-            // ── CYCLE 2 ──────────────────────────────────────────────────────
             case INTAKE2_PATH:
                 intake.setMode(Intake.Mode.INTAKE);
                 if (pathDone()) { intakeEndTimer.reset(); state = AutoState.INTAKE2_DWELL; }
@@ -352,23 +411,8 @@ public class Auto12AllianceCloseRed extends OpMode {
             case INTAKE2_DWELL:
                 intake.setMode(Intake.Mode.INTAKE);
                 if (intakeEndTimer.milliseconds() >= INTAKE_END_DWELL_MS) {
-                    followGateOpen(paths.gateopen2, T_GATEOPEN2); state = AutoState.GATEOPEN2_PATH;
-                }
-                break;
-
-            case GATEOPEN2_PATH:
-                intake.setMode(Intake.Mode.INTAKE);
-                if (pathDone()) {
-                    follower.breakFollowing();
-                    gateOpenTimer.reset();
-                    state = AutoState.GATEOPEN2_DWELL;
-                }
-                break;
-
-            case GATEOPEN2_DWELL:
-                intake.setMode(Intake.Mode.INTAKE);
-                if (gateOpenTimer.milliseconds() >= GATE_OPEN_DWELL_MS) {
-                    followShoot(paths.shoot2, T_SHOOT2); state = AutoState.SHOOT2_PATH;
+                    followShoot(paths.shoot2, T_SHOOT2);
+                    state = AutoState.SHOOT2_PATH;
                 }
                 break;
 
@@ -382,7 +426,9 @@ public class Auto12AllianceCloseRed extends OpMode {
                 alignTimer.reset();
                 if (spinupTimer.milliseconds() >= SPINUP_MS
                         && (isAligned() || alignTimer.seconds() >= ALIGN_TIMEOUT_S)) {
-                    intake.setMode(Intake.Mode.SHOOT); shootTimer.reset(); state = AutoState.SHOOT2_FIRING;
+                    intake.setMode(Intake.Mode.SHOOT);
+                    shootTimer.reset();
+                    state = AutoState.SHOOT2_FIRING;
                 }
                 break;
 
@@ -391,21 +437,17 @@ public class Auto12AllianceCloseRed extends OpMode {
                 if (shootTimer.milliseconds() >= SHOOT_MS) {
                     shooter.setTargetRPM(SHOOT_3_RPM);
                     intake.setMode(Intake.Mode.INTAKE);
-                    followIntake(paths.intake3, T_INTAKE3);
-                    state = AutoState.INTAKE3_PATH;
+                    followGateOpen(paths.gatepos3, T_GATEPOS3);
+                    state = AutoState.GATEPOS3_PATH;
                 }
                 break;
 
-            // ── CYCLE 3 ──────────────────────────────────────────────────────
-            case INTAKE3_PATH:
+            // ── CYCLE 3: gatepos → gateopen → intake → retry → shoot ─────────
+            case GATEPOS3_PATH:
                 intake.setMode(Intake.Mode.INTAKE);
-                if (pathDone()) { intakeEndTimer.reset(); state = AutoState.INTAKE3_DWELL; }
-                break;
-
-            case INTAKE3_DWELL:
-                intake.setMode(Intake.Mode.INTAKE);
-                if (intakeEndTimer.milliseconds() >= INTAKE_END_DWELL_MS) {
-                    followGateOpen(paths.gateopen3, T_GATEOPEN3); state = AutoState.GATEOPEN3_PATH;
+                if (pathDone()) {
+                    followGateOpen(paths.gateopen3, T_GATEOPEN3);
+                    state = AutoState.GATEOPEN3_PATH;
                 }
                 break;
 
@@ -421,7 +463,34 @@ public class Auto12AllianceCloseRed extends OpMode {
             case GATEOPEN3_DWELL:
                 intake.setMode(Intake.Mode.INTAKE);
                 if (gateOpenTimer.milliseconds() >= GATE_OPEN_DWELL_MS) {
-                    followShoot(paths.shoot3, T_SHOOT3); state = AutoState.SHOOT3_PATH;
+                    followIntake(paths.intake3, T_INTAKE3);
+                    state = AutoState.INTAKE3_PATH;
+                }
+                break;
+
+            case INTAKE3_PATH:
+                intake.setMode(Intake.Mode.INTAKE);
+                if (pathDone()) { intakeEndTimer.reset(); state = AutoState.INTAKE3_DWELL; }
+                break;
+
+            case INTAKE3_DWELL:
+                intake.setMode(Intake.Mode.INTAKE);
+                if (intakeEndTimer.milliseconds() >= INTAKE_END_DWELL_MS) {
+                    followIntake(paths.intake3retry, T_INTAKE3RETRY);
+                    state = AutoState.INTAKE3RETRY_PATH;
+                }
+                break;
+
+            case INTAKE3RETRY_PATH:
+                intake.setMode(Intake.Mode.INTAKE);
+                if (pathDone()) { intakeEndTimer.reset(); state = AutoState.INTAKE3RETRY_DWELL; }
+                break;
+
+            case INTAKE3RETRY_DWELL:
+                intake.setMode(Intake.Mode.INTAKE);
+                if (intakeEndTimer.milliseconds() >= INTAKE_END_DWELL_MS) {
+                    followShoot(paths.shoot3, T_SHOOT3);
+                    state = AutoState.SHOOT3_PATH;
                 }
                 break;
 
@@ -435,15 +504,25 @@ public class Auto12AllianceCloseRed extends OpMode {
                 alignTimer.reset();
                 if (spinupTimer.milliseconds() >= SPINUP_MS
                         && (isAligned() || alignTimer.seconds() >= ALIGN_TIMEOUT_S)) {
-                    intake.setMode(Intake.Mode.SHOOT); shootTimer.reset(); state = AutoState.SHOOT3_FIRING;
+                    intake.setMode(Intake.Mode.SHOOT);
+                    shootTimer.reset();
+                    state = AutoState.SHOOT3_FIRING;
                 }
                 break;
 
             case SHOOT3_FIRING:
                 intake.setMode(Intake.Mode.SHOOT);
                 if (shootTimer.milliseconds() >= SHOOT_MS) {
-                    intake.setMode(Intake.Mode.INTAKE); state = AutoState.DONE;
+                    intake.setMode(Intake.Mode.INTAKE);
+                    followIntake(paths.leave, T_LEAVE);
+                    state = AutoState.LEAVE;
                 }
+                break;
+
+            // ── LEAVE + DONE ──────────────────────────────────────────────────
+            case LEAVE:
+                intake.setMode(Intake.Mode.INTAKE);
+                if (pathDone()) { state = AutoState.DONE; }
                 break;
 
             case DONE:
@@ -453,72 +532,114 @@ public class Auto12AllianceCloseRed extends OpMode {
     }
 
     // =========================================================================
-    //  PATHS — Red (x = 144 - x_blue, heading = 180 - heading_blue)
+    //  PATHS
     // =========================================================================
     public static class Paths {
         public PathChain shoot0;
-        public PathChain intake1, gateopen1, shoot1;
-        public PathChain intake2, gateopen2, shoot2;
-        public PathChain intake3, gateopen3, shoot3;
+        public PathChain intakepos1, intake1, gatepos1, gateopen1, shoot1;
+        public PathChain intakepos2, intake2, shoot2;
+        public PathChain gatepos3, gateopen3, intake3, intake3retry, shoot3;
+        public PathChain leave;
 
         public Paths(Follower f) {
+
+            // ── SHOOT 0: start → shoot position ──────────────────────────────
             shoot0 = f.pathBuilder()
                     .addPath(new BezierLine(
-                            new Pose(115.789, 132.895), new Pose(88.316, 88.737)))
-                    .setLinearHeadingInterpolation(Math.toRadians(37), Math.toRadians(37))
+                            new Pose(109.000, 137.000), new Pose(89.000, 84.000)))
+                    .setLinearHeadingInterpolation(Math.toRadians(0), Math.toRadians(50))
+                    .build();
+
+            // ── CYCLE 1 ───────────────────────────────────────────────────────
+            intakepos1 = f.pathBuilder()
+                    .addPath(new BezierLine(
+                            new Pose(89.000, 84.000), new Pose(98.474, 84.158)))
+                    .setLinearHeadingInterpolation(Math.toRadians(50), Math.toRadians(0))
                     .build();
 
             intake1 = f.pathBuilder()
-                    .addPath(new BezierCurve(
-                            new Pose(88.316, 88.737), new Pose(99.474, 83.711), new Pose(127.474, 83.737)))
-                    .setTangentHeadingInterpolation().build();
+                    .addPath(new BezierLine(
+                            new Pose(98.474, 84.158), new Pose(124.421, 84.421)))
+                    .setConstantHeadingInterpolation(Math.toRadians(0))
+                    .build();
+
+            gatepos1 = f.pathBuilder()
+                    .addPath(new BezierLine(
+                            new Pose(124.421, 84.421), new Pose(118.553, 76.737)))
+                    .setConstantHeadingInterpolation(Math.toRadians(0))
+                    .build();
 
             gateopen1 = f.pathBuilder()
-                    .addPath(new BezierCurve(
-                            new Pose(127.474, 83.737), new Pose(110.763, 75.500), new Pose(127.632, 75.842)))
-                    .setLinearHeadingInterpolation(Math.toRadians(0), Math.toRadians(0))
+                    .addPath(new BezierLine(
+                            new Pose(118.553, 74.737), new Pose(128.329, 76.711)))
+                    .setConstantHeadingInterpolation(Math.toRadians(0))
                     .build();
 
             shoot1 = f.pathBuilder()
-                    .addPath(new BezierCurve(
-                            new Pose(110.632, 75.842), new Pose(88.184, 94.079), new Pose(88.316, 88.316)))
-                    .setLinearHeadingInterpolation(Math.toRadians(0), Math.toRadians(30))
+                    .addPath(new BezierLine(
+                            new Pose(128.329, 74.711), new Pose(89.000, 84.000)))
+                    .setLinearHeadingInterpolation(Math.toRadians(0), Math.toRadians(50))
+                    .build();
+
+            // ── CYCLE 2 (no gate) ─────────────────────────────────────────────
+            intakepos2 = f.pathBuilder()
+                    .addPath(new BezierLine(
+                            new Pose(89.000, 84.000), new Pose(95.842, 59.263)))
+                    .setLinearHeadingInterpolation(Math.toRadians(50), Math.toRadians(0))
                     .build();
 
             intake2 = f.pathBuilder()
-                    .addPath(new BezierCurve(
-                            new Pose(88.316, 88.316), new Pose(85.737, 47.105), new Pose(94.053, 61.263),
-                            new Pose(124.868, 59.605), new Pose(128.000, 59.474)))
-                    .setTangentHeadingInterpolation().build();
-
-            gateopen2 = f.pathBuilder()
-                    .addPath(new BezierCurve(
-                            new Pose(128.000, 59.474), new Pose(111.263, 75.579), new Pose(127.526, 64.684)))
-                    .setLinearHeadingInterpolation(Math.toRadians(0), Math.toRadians(0))
+                    .addPath(new BezierLine(
+                            new Pose(95.842, 59.263), new Pose(126.632, 59.237)))
+                    .setTangentHeadingInterpolation()
                     .build();
 
             shoot2 = f.pathBuilder()
                     .addPath(new BezierLine(
-                            new Pose(111.526, 75.684), new Pose(88.000, 88.211)))
-                    .setLinearHeadingInterpolation(Math.toRadians(0), Math.toRadians(30))
+                            new Pose(126.632, 59.237), new Pose(89.000, 84.105)))
+                    .setLinearHeadingInterpolation(Math.toRadians(0), Math.toRadians(50))
+                    .build();
+
+            // ── CYCLE 3: gate first, then intake + retry ──────────────────────
+            gatepos3 = f.pathBuilder()
+                    .addPath(new BezierLine(
+                            new Pose(89.000, 84.105), new Pose(116.526, 70.368)))
+                    .setLinearHeadingInterpolation(Math.toRadians(50), Math.toRadians(0))
+                    .build();
+
+            gateopen3 = f.pathBuilder()
+                    .addPath(new BezierLine(
+                            new Pose(116.526, 66.368), new Pose(129.526, 70.211)))
+                    .setConstantHeadingInterpolation(Math.toRadians(0))
                     .build();
 
             intake3 = f.pathBuilder()
                     .addPath(new BezierCurve(
-                            new Pose(88.000, 88.211), new Pose(85.184, 49.500),
-                            new Pose(82.816, 50.816), new Pose(134.579, 48.263)))
-                    .setTangentHeadingInterpolation().build();
+                            new Pose(129.526, 70.211),
+                            new Pose(117.368, 55.842),
+                            new Pose(135.737, 54.421)))
+                    .setLinearHeadingInterpolation(Math.toRadians(0), Math.toRadians(0))
+                    .build();
 
-            gateopen3 = f.pathBuilder()
+            intake3retry = f.pathBuilder()
                     .addPath(new BezierCurve(
-                            new Pose(134.579, 48.263), new Pose(111.605, 73.789), new Pose(127.579, 64.105)))
+                            new Pose(135.737, 54.421),
+                            new Pose(113.316, 44.000),
+                            new Pose(135.579, 43.474)))
                     .setLinearHeadingInterpolation(Math.toRadians(0), Math.toRadians(0))
                     .build();
 
             shoot3 = f.pathBuilder()
                     .addPath(new BezierLine(
-                            new Pose(111.579, 73.105), new Pose(86.632, 109.316)))
-                    .setLinearHeadingInterpolation(Math.toRadians(0), Math.toRadians(10))
+                            new Pose(135.579, 43.474), new Pose(89.211, 84.000)))
+                    .setLinearHeadingInterpolation(Math.toRadians(0), Math.toRadians(50))
+                    .build();
+
+            // ── LEAVE ─────────────────────────────────────────────────────────
+            leave = f.pathBuilder()
+                    .addPath(new BezierLine(
+                            new Pose(89.211, 84.000), new Pose(100.053, 76.789)))
+                    .setConstantHeadingInterpolation(Math.toRadians(50))
                     .build();
         }
     }

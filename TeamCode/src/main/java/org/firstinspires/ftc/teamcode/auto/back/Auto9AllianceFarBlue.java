@@ -47,10 +47,10 @@ public class Auto9AllianceFarBlue extends OpMode {
     // =========================================================================
     //  SHOOTER RPMs
     // =========================================================================
-    private static final double SHOOT_0_RPM = 3900.0;
-    private static final double SHOOT_1_RPM = 3900.0;
-    private static final double SHOOT_2_RPM = 3900.0;
-    private static final double SHOOT_3_RPM = 3900.0;
+    private static final double SHOOT_0_RPM = 4050.0;
+    private static final double SHOOT_1_RPM = 4050.0;
+    private static final double SHOOT_2_RPM = 4050.0;
+    private static final double SHOOT_3_RPM = 4050.0;
 
     // =========================================================================
     //  TIMING CONSTANTS

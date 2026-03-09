@@ -35,10 +35,10 @@ public class Turret {
     // =========================================================================
     //  GOAL POSITIONS (inches) — must match SWM and Drivetrain
     // =========================================================================
-    private static final double BLUE_GOAL_X = 7;
-    private static final double BLUE_GOAL_Y = 141.0;
+    private static final double BLUE_GOAL_X = 11.5;
+    private static final double BLUE_GOAL_Y = 141.5;
     private static final double RED_GOAL_X  = 134.5;
-    private static final double RED_GOAL_Y  = 140.0;
+    private static final double RED_GOAL_Y  = 141.5;
 
     // =========================================================================
     //  CONSTRUCTOR

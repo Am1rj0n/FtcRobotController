@@ -20,7 +20,7 @@ import com.pedropathing.geometry.BezierLine;
 import com.pedropathing.geometry.Pose;
 import com.pedropathing.paths.PathChain;
 
-@Autonomous(name = "Auto 12 Close Red MAIN", group = "Solo")
+@Autonomous(name = "Auto 12 Close Red MAIN (wall)", group = "Solo")
 @Configurable
 public class Auto12CloseRed extends OpMode {
 
@@ -53,17 +53,17 @@ public class Auto12CloseRed extends OpMode {
     // =====================================================================
     //  SHOOTER RPMs  — tune each independently
     // =====================================================================
-    private static final double SHOOT_0_RPM = 3000.0;
-    private static final double SHOOT_1_RPM = 3000.0;
-    private static final double SHOOT_2_RPM = 3000.0;
-    private static final double SHOOT_3_RPM = 3000.0;
+    private static final double SHOOT_0_RPM = 3200.0;
+    private static final double SHOOT_1_RPM = 3200.0;
+    private static final double SHOOT_2_RPM = 3200.0;
+    private static final double SHOOT_3_RPM = 3200.0;
 
     // =====================================================================
     //  TIMING CONSTANTS
     // =====================================================================
     private static final double INITIAL_SPINUP_DURATION = 1.0;
     private static final double SPINUP_DURATION         = 0.8;
-    private static final double SHOOT_DURATION          = 1.9;
+    private static final double SHOOT_DURATION          = 2.1;
     /** Max time to wait for alignment before shooting anyway. */
     private static final double ALIGN_TIMEOUT_S         = 1.2;
     /** Extra dwell AFTER gate push completes (0 = off). */
@@ -89,7 +89,7 @@ public class Auto12CloseRed extends OpMode {
     // =====================================================================
     //  PATH SPEED
     // =====================================================================
-    private static final double INTAKE_PATH_SPEED = 0.9;
+    private static final double INTAKE_PATH_SPEED = 0.87;
 
     // =====================================================================
     //  INTERNAL STATE

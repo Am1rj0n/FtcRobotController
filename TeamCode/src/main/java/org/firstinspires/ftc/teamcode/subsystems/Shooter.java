@@ -75,7 +75,7 @@ public class Shooter {
         }
 
         // Math.abs ensures readRPM is always positive regardless of encoder direction
-        encoderVelocity = Math.abs(s1.getVelocity());
+        encoderVelocity = Math.abs(s2.getVelocity());
         readRPM         = (encoderVelocity * 60.0) / TICKS_PER_REV;
 
         android.util.Log.d("SHOOTER", "raw=" + s1.getVelocity() + " abs=" + encoderVelocity + " rpm=" + readRPM);

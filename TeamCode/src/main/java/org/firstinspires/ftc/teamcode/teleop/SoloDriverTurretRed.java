@@ -57,7 +57,7 @@ import org.firstinspires.ftc.teamcode.subsystems.*;
  *  Shooter off → light off
  * ─────────────────────────────────────────────────────────────────────────────
  */
-@TeleOp(name = "Solo Driver Turret Red [TEST]", group = "Test")
+@TeleOp(name = "Solo Driver Turret Red", group = "Comp")
 public class SoloDriverTurretRed extends OpMode {
 
     private static final boolean IS_RED = true;
@@ -215,14 +215,15 @@ public class SoloDriverTurretRed extends OpMode {
         handleGP2RPM();               // GP2 R1/L1 fine RPM adjust
 
         if (shooter.isActive()) {
-            shooter.setRPMForDistance(swm.getDistanceForRPM() * 0.0254);
+            shooter.setRPMForDistance(swm.getDistanceForRPM());
+
         }
 
         applyTurretOutput();
 
         boolean aligned = isTurretAligned()
                 && (!drivetrain.isGoalTrackingEnabled() || drivetrain.isAlignedWithGoal());
-        lights.update(shooter.isActive(), shooter.getRPMMode(), aligned);
+        lights.update(shooter.isActive(), shooter.getRPMMode(), aligned, swm.getDistanceForRPM());
 
         displayTelemetry();
     }

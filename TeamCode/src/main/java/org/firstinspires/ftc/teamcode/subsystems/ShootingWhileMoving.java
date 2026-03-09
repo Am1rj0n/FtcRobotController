@@ -24,7 +24,7 @@ public class ShootingWhileMoving {
      * INCREASE if shots land behind where you were (you moved past aim point).
      * DECREASE if shots land in front (overcorrecting).
      */
-    private static final double BALL_TRANSFER_TIME = 0.40;
+    private static final double BALL_TRANSFER_TIME = 0.70;
 
     /**
      * Low-pass filter weight for acceleration + omega smoothing.
